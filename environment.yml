@@ -1,0 +1,43 @@
+# Requirement file for conda environment
+name: BRAIN2IMAGE
+channels:
+    - conda-forge
+    - nvidia
+    - pytorch
+    - defaults
+dependencies:
+    # Python
+    - python=3.12.*
+
+    # Core libraries
+    - numpy>=2.0.0
+    - pandas>=2.2.2
+    - scipy>=1.15.0
+    - scikit-learn>=1.6.0
+    - matplotlib>=3.10.0
+    - tqdm
+
+    - pip
+    - pip:
+        # Install pytorch
+        - torch>=2.6.0
+        - torchvision>=0.17.0
+        - torchaudio>=2.6.0
+        - torchmetrics>=0.11.0
+        - --extra-index-url https://download.pytorch.org/whl/cu126
+
+        # Other dependencies
+        - einops
+        - h5py
+        - lmdb
+        - mne
+        - ptflops
+        - pyEDFlib
+        - torchinfo
+        - umap-learn
+        - tensorboard
+
+# Create
+# conda env create -f environment.yml
+# Remove
+# conda env remove -n <ENV name>
