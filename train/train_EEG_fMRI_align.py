@@ -77,7 +77,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--num_transformer_layers", type=int, default=4, help="Number of transformer layers for multitoken_vit pooling")
     parser.add_argument("--num_attention_heads", type=int, default=4, help="Number of attention heads for multitoken_vit transformer")
     parser.add_argument("--alignment_attention_heads", type=int, default=4, help="Number of attention heads for alignment attention")
-    parser.add_argument('--alignment_dropout', type=float, default=0.1, help='Dropout for alignment attention')
+    parser.add_argument('--alignment_attention_dropout', type=float, default=0.25, help='Dropout for alignment attention')
     
     return parser.parse_args()
 
@@ -120,7 +120,7 @@ def train(model: EEG_fMRI_Align,
             mse_losses = []
             infonce_losses = []
     
-            for EEG, fMRI in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}", mininterval=10):
+            for EEG, fMRI in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}"):
                 
                 # Move data to device
                 EEG, fMRI = EEG.to(device), fMRI.to(device)
@@ -182,10 +182,11 @@ def train(model: EEG_fMRI_Align,
             # Validation
             model.eval()
             outputs = []
+            fMRI_targets = []
             val_loss = 0.0
             with torch.no_grad():
 
-                for EEG, fMRI in tqdm(data_loader['val'], desc=f"Validation Epoch {epoch+1}", mininterval=10):
+                for EEG, fMRI in tqdm(data_loader['val'], desc=f"Validation Epoch {epoch+1}"):
 
                     # Move data to device
                     EEG, fMRI = EEG.to(device), fMRI.to(device)
@@ -193,13 +194,14 @@ def train(model: EEG_fMRI_Align,
                     # Forward pass and compute loss
                     out = model.forward(EEG, fMRI)
                     outputs.append(out)
+                    fMRI_targets.append(fMRI)
                     loss, _, _ = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze())
                     val_loss += loss.item()
 
                 # concatenate outputs and compute metrics
                 outputs = torch.cat(outputs, dim=0)
-                mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI.squeeze())
-
+                fMRI_targets = torch.cat(fMRI_targets, dim=0)
+                mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
             # verbose validation metrics
             avg_val_loss = val_loss / len(data_loader['val'])
             print(f"Epoch [{epoch+1}/{num_epochs}] - Val Loss: {avg_val_loss:.4f} (MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc: {retrieval_acc:.4f})")
@@ -239,20 +241,23 @@ def test(model: EEG_fMRI_Align,
     """
     model.eval()
     outputs = []
+    fMRI_targets = []
     with torch.no_grad():
 
-        for EEG, fMRI in tqdm(data_loader, desc="Testing", mininterval=10):
+        for EEG, fMRI in tqdm(data_loader, desc="Testing"):
 
             # Move data to device
             EEG, fMRI = EEG.to(device), fMRI.to(device)
 
-            # Forward pass and compute loss
+            # Forward pass
             out = model.forward(EEG, fMRI)
             outputs.append(out)
+            fMRI_targets.append(fMRI)
 
         # concatenate outputs and compute metrics
         outputs = torch.cat(outputs, dim=0)
-        mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI.squeeze())
+        fMRI_targets = torch.cat(fMRI_targets, dim=0)
+        mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
         print(f"Test Metrics - MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc: {retrieval_acc:.4f}")
 
         # Tensor board logging
@@ -281,7 +286,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Create experiment folder
-    log_dir = f"runs/EEG_fMRI_align_{int(time.time())}"
+    log_dir = f"runs/EEG_fMRI_align_{int(time())}"
     os.makedirs(log_dir, exist_ok=True)
     print(f"Logging to {log_dir}")
     # Create logging and ckpt directories
@@ -318,7 +323,7 @@ if __name__ == "__main__":
         },
         'Attention_Merge': {
             'alignment_attention_heads': args.alignment_attention_heads,
-            'alignment_attention_dropout': args.alignment_dropout
+            'alignment_attention_dropout': args.alignment_attention_dropout
         }
     }
 

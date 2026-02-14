@@ -52,7 +52,7 @@ if [ "$USE_PRETRAINED_WEIGHTS" = "true" ] && [ -z "$FOUNDATION_DIR" ]; then
 fi
 
 # Build Command
-CMD="python train_EEG_fMRI_align.py \
+CMD="python -m train.train_EEG_fMRI_align \
     --seed $SEED \
     --cuda $CUDA \
     --epochs $EPOCHS \
