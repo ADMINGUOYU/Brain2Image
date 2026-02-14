@@ -209,6 +209,12 @@ def train(model: EEG_fMRI_Align,
             # Checkpointing
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
+                # delete every old checkpoint in the ckpt_dir
+                for filename in os.listdir(ckpt_dir):
+                    file_path = os.path.join(ckpt_dir, filename)
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                # save new ckpt
                 checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
                 model.save_model(checkpoint_path)
                 print(f"Saved best model to {checkpoint_path}")
