@@ -352,7 +352,7 @@ if __name__ == "__main__":
     # model.transformer.parameters()
     # choose a optimizer get attributes by name from torch.optim
     optimizer_class: torch.optim.Optimizer = getattr(optim, args.optimizer)
-    print(f"Using optimizer: {type(optimizer_class).__name__}")
+    print(f"Using optimizer: {optimizer_class.__name__}")
     # Get parameters
     backbone_params = []
     other_params = []
