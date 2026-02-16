@@ -171,7 +171,7 @@ def process_things_eeg_data(subject_wanted: list) -> None:
             # we loop through the samples and create a dataframe
             # 4 recordings stored together
             data_list = []
-            for i in range(eeg.shape[0]):
+            for i in tqdm(range(eeg.shape[0]), desc = f"Processing {subject} {split} data"):
                 # slice the eeg data for the sample
                 sample_eeg = eeg[ i , : ]  # shape: (4, 63, 250)
                 # get the image path for the sample
@@ -203,6 +203,8 @@ def process_things_eeg_data(subject_wanted: list) -> None:
 
     # we loop through the subjects and load the data
     for subject in subjects:
+        print(f"Processing subject {subject}...")
+        # Get the folder path for the subject
         subject_folder_path = os.path.join(data_path, subject)
         # we load the train and test data
         # under each subject folder, there are two files: train.pt and test.pt
