@@ -24,6 +24,7 @@ import numpy as np
 from transformers import CLIPModel, CLIPProcessor
 from PIL import Image
 from torchvision import transforms
+from tqdm import tqdm
 
 # Data path (root folder to all subjects / images)
 data_path = 'datasets/THINGS-EEG/Preprocessed_data_250Hz_whiten'
@@ -101,7 +102,8 @@ def process_things_image_data() -> None:
             return None
     # we apply the function to the dataframe
     print("Loading images into dataframe...")
-    images_df['image_data'] = images_df['image_path'].apply(load_image)
+    tqdm.pandas(desc = "Loading images")
+    images_df['image_data'] = images_df['image_path'].progress_apply(load_image)
     # we check if there are any images that failed to load
     failed_images = images_df[images_df['image_data'].isnull()]
     if len(failed_images) > 0:
@@ -130,7 +132,8 @@ def process_things_image_data() -> None:
             raise ValueError(f"Error processing image for embedding: {e}")
     # we apply the function to the dataframe
     print("Processing images to get embeddings...")
-    images_df['image_embedding'] = images_df['image_data'].apply(get_image_embedding)
+    tqdm.pandas(desc = "Processing image embeddings")
+    images_df['image_embedding'] = images_df['image_data'].progress_apply(get_image_embedding)
     # we check if there are any images that failed to process
     failed_embeddings = images_df[images_df['image_embedding'].isnull()]
     if len(failed_embeddings) > 0:
