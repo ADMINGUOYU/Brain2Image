@@ -100,4 +100,4 @@ axs[1].set_title(f"GT Image: {class_name[0]}")
 axs[1].imshow(img)
 plt.tight_layout()
 # Save the figure
-plt.savefig('datasets/eeg_visualization.png')
+plt.savefig('datasets/things-eeg_visualize.png')
