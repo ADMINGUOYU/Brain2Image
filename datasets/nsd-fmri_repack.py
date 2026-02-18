@@ -56,7 +56,8 @@ def process_nsd_fmri_image_all_subjects():
     # Load the subject indices
     with h5py.File(coco_image_indices_path, 'r') as f:
         # Get indices for each subject (using list comprehension)
-        subject_indices = [set(f[f'subj0{i}'][:]) for i in range(1, 9)]
+        # we only use lists from 1,2,5,7 (completed all sessions)
+        subject_indices = [set(f[f'subj0{i}'][:]) for i in [1, 2, 5, 7]]
     # Find the intersection (indices present in all 8 subjects)
     shared_1000_indices = set.intersection(*subject_indices)
     # Convert from np.int64 to python int
@@ -192,7 +193,6 @@ if __name__ == "__main__":
 
     # read processed data
     subjects_df = pd.read_pickle(subjects_df_path)
-    images_df = pd.read_pickle(images_df_path)
 
     # filter the subjects_df to only include the wanted subjects
     print(f"Filtering the data to only include the wanted subjects: {subject_wanted}...")
