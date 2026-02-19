@@ -316,3 +316,34 @@ for things_subject, nsd_subject in subjects:
     # save the figure
     fig.savefig(os.path.join(processed_dir, f"paired_embeddings_pca_clusters_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png"))
     print(f"Saved PCA visualization of paired embeddings with cluster labels for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_embeddings_pca_clusters_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png')}")
+
+    # fetch 1 pair from each cluster and visualize them
+    cluster_examples = {}
+    for cluster_label in range(num_of_cluster):
+        cluster_indices = np.where(paired_image_labels == cluster_label)[0]
+        if len(cluster_indices) > 0:
+            example_idx = cluster_indices[len(cluster_indices) // 2]
+            # load the image data
+            things_image_index = paired_image_indices[example_idx][0]
+            nsd_image_index = paired_image_indices[example_idx][1]
+            things_image_data = things_subject_images_df[things_subject_images_df['image_index'] == things_image_index]['image_data'].values[0]
+            nsd_image_data = nsd_subject_images_df[nsd_subject_images_df['image_index'] == nsd_image_index]['image_data'].values[0]
+            cluster_examples[cluster_label] = (things_image_index, nsd_image_index, things_image_data, nsd_image_data)
+    # visualize the cluster examples
+    plt.figure(figsize = (20, 4))
+    for cluster_label, (things_image_index, nsd_image_index, things_image_data, nsd_image_data) in cluster_examples.items():
+        plt.subplot(2, num_of_cluster, cluster_label + 1)
+        plt.imshow(things_image_data)
+        plt.title(f"Cluster {cluster_label} - THINGS idx: {things_image_index}")
+        plt.axis('off')
+        plt.subplot(2, num_of_cluster, num_of_cluster + cluster_label + 1)
+        plt.imshow(nsd_image_data)
+        plt.title(f"Cluster {cluster_label} - NSD idx: {nsd_image_index}")
+        plt.axis('off')
+    plt.suptitle(f"Example paired images from each cluster for THINGS subject {things_subject} and NSD subject {nsd_subject}")
+    plt.tight_layout()
+    # save the figure
+    plt.savefig(os.path.join(processed_dir, f"cluster_examples_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png"))
+    print(f"Saved example paired images from each cluster for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'cluster_examples_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png')}")
+    # del the image data to save memory
+    del cluster_examples
