@@ -45,7 +45,7 @@ processed_data_dir = 'datasets/processed'
 os.makedirs(processed_data_dir, exist_ok = True)
 
 # we specify the subjects we want to process
-subject_wanted = ['sub-01'] # 10 in total
+subject_wanted = ['sub-01'] # 8 in total
 
 # ---------------- End of configuration ---------------- #
 

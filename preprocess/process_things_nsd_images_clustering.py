@@ -36,7 +36,8 @@ things_images_df_path = os.path.join(processed_dir, "things_images_df.pkl")
 
 # The subjects we want to use (only process the image viewed by these subjects)
 # NOTE: we will LOOP process (not batched)
-subjects =  ['sub-01'] # 10 in total
+# NOTE: in (things subject, nsd subject)
+subjects =  [('sub-01', 'sub-01')]
 
 # top paired images we want to get for each subject
 # NOTE: if we don't have that amount of paired images,
@@ -83,40 +84,61 @@ if missing_columns_things:
 print("Successfully loaded NSD and THINGS images DataFrames with all required columns.")
 
 # we loop every subject we want
-for subject in subjects:
+for things_subject, nsd_subject in subjects:
     # verbose
-    print(f"Processing subject: {subject}...")
+    print(f"Processing subject pair: THINGS {things_subject} NSD {nsd_subject}...")
 
     # We need to get the images viewed (THINGS) from the processed EEG dataset
     # We first locate all 'things_eeg_data_df_XXX.pkl' and find one which XXX contains the current subject
     things_eeg_data_df_path = None
     for file in os.listdir(processed_dir):
         if file.startswith('things_eeg_data_df_') and file.endswith('.pkl'):
-            if subject in file:
+            if things_subject in file:
                 things_eeg_data_df_path = os.path.join(processed_dir, file)
                 break
     if things_eeg_data_df_path is None:
-        raise FileNotFoundError(f"Could not find the things_eeg_data_df file for subject {subject} in {processed_dir}.")
-
+        raise FileNotFoundError(f"Could not find the things_eeg_data_df file for subject {things_subject} in {processed_dir}.")
     # Load the things_eeg_data_df containing the current subject
     # dataframe columns: (eeg / class_label / image_index / subject / split)
     things_eeg_data_df = pd.read_pickle(things_eeg_data_df_path)
     # we only filter the rows which subject == current subject
-    things_eeg_data_df = things_eeg_data_df[things_eeg_data_df['subject'] == subject]
+    things_eeg_data_df = things_eeg_data_df[things_eeg_data_df['subject'] == things_subject]
     # verbose
-    print(f"Number of rows in things_eeg_data_df for {subject}: {len(things_eeg_data_df)}")
+    print(f"Number of rows in things_eeg_data_df for {things_subject}: {len(things_eeg_data_df)}")
     # we get the unique image indices viewed by the current subject
     # save it to list and unload the things_eeg_data_df to save memory
     things_subject_image_indices = things_eeg_data_df['image_index'].unique().tolist()
-    print(f"Number of unique images viewed by {subject} in THINGS: {len(things_subject_image_indices)}")
+    print(f"Number of unique images viewed by {things_subject} in THINGS: {len(things_subject_image_indices)}")
     del things_eeg_data_df
+
+    # we also open the nsd_fmri_data_df
+    nsd_fmri_data_df_path = None
+    for file in os.listdir(processed_dir):
+        if file.startswith('nsd_fmri_data_df_') and file.endswith('.pkl'):
+            if nsd_subject in file:
+                nsd_fmri_data_df_path = os.path.join(processed_dir, file)
+                break
+    if nsd_fmri_data_df_path is None:
+        raise FileNotFoundError(f"Could not find the nsd_fmri_data_df file for subject {nsd_subject} in {processed_dir}.")
+    # Load the nsd_fmri_data_df containing the current subject
+    # dataframe columns: (fmri / image_index / subject / split / sample_id / tar_path)
+    nsd_fmri_data_df = pd.read_pickle(nsd_fmri_data_df_path)
+    # we only filter the rows which subject == current subject
+    nsd_fmri_data_df = nsd_fmri_data_df[nsd_fmri_data_df['subject'] == nsd_subject]
+    # verbose
+    print(f"Number of rows in nsd_fmri_data_df for {nsd_subject}: {len(nsd_fmri_data_df)}")
+    # we get the unique image indices viewed by the current subject
+    # save it to list and unload the nsd_fmri_data_df to save memory
+    nsd_subject_image_indices = nsd_fmri_data_df['image_index'].unique().tolist()
+    print(f"Number of unique images viewed by {nsd_subject} in NSD: {len(nsd_subject_image_indices)}")
+    del nsd_fmri_data_df
 
     # we filter the things_images_df to only include the images viewed by the current subject
     things_subject_images_df = things_images_df[things_images_df['image_index'].isin(things_subject_image_indices)]
-    print(f"Number of rows in things_subject_images_df for {subject}: {len(things_subject_images_df)}")
+    print(f"Number of rows in things_subject_images_df for {things_subject}: {len(things_subject_images_df)}")
     # we also filter the nsd_images_df to only include the images viewed by the current subject
-    nsd_subject_images_df = nsd_images_df[nsd_images_df['subject'] == subject]
-    print(f"Number of rows in nsd_subject_images_df for {subject}: {len(nsd_subject_images_df)}")
+    nsd_subject_images_df = nsd_images_df[nsd_images_df['image_index'].isin(nsd_subject_image_indices)]
+    print(f"Number of rows in nsd_subject_images_df for {nsd_subject}: {len(nsd_subject_images_df)}")
 
     # we convert the image index column and image embedding column to torch tensor 
     # for later cosine similarity calculation and stack them into 
@@ -129,10 +151,11 @@ for subject in subjects:
     print(f"nsd_image_indices shape: {nsd_image_indices.shape}, nsd_image_embeddings shape: {nsd_image_embeddings.shape}")
 
     # check if we have the cached similarity matrix file ready
-    cosine_similarity_cache_path = os.path.join(processed_dir, f"cosine_similarity_scores_subject_{subject}.pt")
+    cosine_similarity_cache_path = os.path.join(processed_dir, f"cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt")
     if os.path.exists(cosine_similarity_cache_path):
-        cosine_similarity_scores = torch.load(cosine_similarity_cache_path)
-        print(f"Loaded cached cosine similarity scores for subject {subject}")
+        cosine_similarity_scores: torch.Tensor = torch.load(cosine_similarity_cache_path)
+        print(f"Loaded cached cosine similarity scores for subject THINGS {things_subject} and NSD {nsd_subject} from {cosine_similarity_cache_path}.")
+        print(f"Cosine similarity scores shape: {cosine_similarity_scores.shape}")
         print(f"If this is unexpected, please delete the cache file at {cosine_similarity_cache_path} and re-run the code to recalculate the similarity scores.")
     else:
         # we calculate the cosine similarity between every pairs
@@ -154,8 +177,8 @@ for subject in subjects:
         print(f"Cosine similarity scores shape: {cosine_similarity_scores.shape}")
 
         # cache the cosine similarity score matrix
-        torch.save(cosine_similarity_scores, os.path.join(processed_dir, f"cosine_similarity_scores_subject_{subject}.pt"))
-        print(f"Saved cosine similarity scores for subject {subject} to {os.path.join(processed_dir, f'cosine_similarity_scores_subject_{subject}.pt')}")
+        torch.save(cosine_similarity_scores, os.path.join(processed_dir, f"cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt"))
+        print(f"Saved cosine similarity scores for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt')}")
 
     # we then get the top K paired (make sure images are one-to-one -> we don't
     # want one THINGS eeg data to be paired with multiple NSS fmri data)
@@ -178,7 +201,7 @@ for subject in subjects:
         if len(paired_indices) >= top_k:
             break
     if len(paired_indices) < top_k:
-        print(f"Warning: Only found {len(paired_indices)} paired images for subject {subject}, which is less than the requested top_k = {top_k}.\n\
+        print(f"Warning: Only found {len(paired_indices)} paired images for subject THINGS {things_subject} and NSD {nsd_subject}, which is less than the requested top_k = {top_k}.\n\
               Consider increasing the search_expansion_factor or check the cosine similarity scores to see if there are enough similar images between the two datasets.")
 
     # We map back to image indexes
@@ -206,18 +229,18 @@ for subject in subjects:
         plt.imshow(nsd_image_data[i])
         plt.title(f"NSD idx: {paired_image_indices[i][1]}")
         plt.axis('off')
-    plt.suptitle(f"Example paired images for subject {subject}")
+    plt.suptitle(f"Example paired images for THINGS subject {things_subject} and NSD subject {nsd_subject}")
     plt.tight_layout()
     # save the figure
-    plt.savefig(os.path.join(processed_dir, f"paired_images_subject_{subject}.png"))
+    plt.savefig(os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png"))
     # del the image data to save memory
     del things_image_data
     del nsd_image_data
 
     # save the index of the paired images to a csv file for later use
     paired_images_df = pd.DataFrame(paired_image_indices, columns = ['things_image_index', 'nsd_image_index'])
-    paired_images_df.to_csv(os.path.join(processed_dir, f"paired_images_subject_{subject}.csv"), index = False)
-    print(f"Saved paired image indices for subject {subject} to {os.path.join(processed_dir, f'paired_images_subject_{subject}.csv')}")
+    paired_images_df.to_csv(os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv"), index = False)
+    print(f"Saved paired image indices for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv')}")
 
     # Now we want to do PCA analysis to the paired images perform clustering
     # fetch the embeddings upon the indexes we got
@@ -245,7 +268,7 @@ for subject in subjects:
                  [paired_things_embeddings_pca[i, 1], paired_nsd_embeddings_pca[i, 1]], 
                  [paired_things_embeddings_pca[i, 2], paired_nsd_embeddings_pca[i, 2]],
                  c = 'gray', alpha = 0.5)
-    ax.set_title(f"PCA for subject {subject} (Pair-wise)")
+    ax.set_title(f"PCA for THINGS subject {things_subject} and NSD subject {nsd_subject} (Pair-wise)")
     ax.set_xlabel("Principal Component 1")
     ax.set_ylabel("Principal Component 2")
     ax.set_zlabel("Principal Component 3")
@@ -255,8 +278,8 @@ for subject in subjects:
     ax.legend()
     fig.tight_layout()
     # save the figure
-    fig.savefig(os.path.join(processed_dir, f"paired_embeddings_pca_pairwise_subject_{subject}.png"))
-    print(f"Saved pair-wise PCA visualization of paired embeddings for subject {subject} to {os.path.join(processed_dir, f'paired_embeddings_pca_pairwise_subject_{subject}.png')}")
+    fig.savefig(os.path.join(processed_dir, f"paired_embeddings_pca_pairwise_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png"))
+    print(f"Saved pair-wise PCA visualization of paired embeddings for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_embeddings_pca_pairwise_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png')}")
 
     # then we give labels to these clusters
     # we can use KMeans clustering to cluster the paired embeddings into k clusters
@@ -269,8 +292,8 @@ for subject in subjects:
     # add to paired_images_df and overwrite the csv file
     paired_image_labels = cluster_labels[:len(paired_indices)] # (num_pairs,)
     paired_images_df['cluster_label'] = paired_image_labels
-    paired_images_df.to_csv(os.path.join(processed_dir, f"paired_images_subject_{subject}.csv"), index = False)
-    print(f"Saved paired image indices with cluster labels for subject {subject} to {os.path.join(processed_dir, f'paired_images_subject_{subject}.csv')}")
+    paired_images_df.to_csv(os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv"), index = False)
+    print(f"Saved paired image indices with cluster labels for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv')}")
     # visualize the clusters in the PCA space (3D plot)
     fig = plt.figure(figsize = (8, 8), dpi = 300)
     ax = fig.add_subplot(111, projection = '3d')
@@ -281,7 +304,7 @@ for subject in subjects:
                  [paired_things_embeddings_pca[i, 1], paired_nsd_embeddings_pca[i, 1]], 
                  [paired_things_embeddings_pca[i, 2], paired_nsd_embeddings_pca[i, 2]],
                  c = 'gray', alpha = 0.5)
-    ax.set_title(f"PCA for subject {subject} with Cluster Labels")
+    ax.set_title(f"PCA for THINGS subject {things_subject} and NSD subject {nsd_subject} with Cluster Labels")
     ax.set_xlabel("Principal Component 1")
     ax.set_ylabel("Principal Component 2")
     ax.set_zlabel("Principal Component 3")
@@ -291,5 +314,5 @@ for subject in subjects:
     ax.legend()
     fig.tight_layout()
     # save the figure
-    fig.savefig(os.path.join(processed_dir, f"paired_embeddings_pca_clusters_subject_{subject}.png"))
-    print(f"Saved PCA visualization of paired embeddings with cluster labels for subject {subject} to {os.path.join(processed_dir, f'paired_embeddings_pca_clusters_subject_{subject}.png')}")
+    fig.savefig(os.path.join(processed_dir, f"paired_embeddings_pca_clusters_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png"))
+    print(f"Saved PCA visualization of paired embeddings with cluster labels for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_embeddings_pca_clusters_subject_THINGS_{things_subject}_NSD_{nsd_subject}.png')}")
