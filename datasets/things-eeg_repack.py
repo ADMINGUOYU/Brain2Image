@@ -6,7 +6,7 @@
 
 # We'll save the processed data in pandas.DataFrame (eeg / class_label / image_index / subject / split).
 # We'll also index every unique images in 'img_set_path' and save the
-# index in a pandas.DataFrame for later use. (image_index / image_data / image_path / image_embedding / image_label / split)
+# index in a pandas.DataFrame for later use. (image_index / image_data / image_path / image_embedding / class_label / split)
 
 # --------------- Start of configuration --------------- #
 
