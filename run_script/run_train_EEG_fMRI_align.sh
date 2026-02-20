@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Experiment Configuration
-SEED=3407
+SEED=648
 CUDA=0
 EPOCHS=100
 BATCH_SIZE=64
@@ -13,17 +13,18 @@ CLIP_VALUE=1.0
 DROPOUT=0.25
 
 # Path Configuration
-DATASETS_DIR="/path/to/datasets"
+DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01"
 
 # Model Configuration
 FROZEN="false"  # Set to "true" to freeze EEG encoder
 USE_PRETRAINED_WEIGHTS="true"
-FOUNDATION_DIR="/path/to/foundation/model"  # Required if USE_PRETRAINED_WEIGHTS=true
+FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"  # Required if USE_PRETRAINED_WEIGHTS=true
 MODEL_DIR=""  # Only set if loading full checkpoint
 
 # Architecture Parameters
 MSE_SCALE=1.0
 INFONCE_SCALE=1.0
+PROTO_DISTILL_SCALE=1.0
 TEMPERATURE=0.07
 NORMALIZE_FMRI="true"
 POOLING_TYPE="multitoken_vit"
@@ -69,6 +70,7 @@ CMD="python -m train.train_EEG_fMRI_align \
     --mlp_layers $MLP_LAYERS \
     --mse_scale $MSE_SCALE \
     --infonce_scale $INFONCE_SCALE \
+    --proto_distill_scale $PROTO_DISTILL_SCALE \
     --temperature $TEMPERATURE \
     --normalize_fmri $NORMALIZE_FMRI \
     --pooling_type $POOLING_TYPE \

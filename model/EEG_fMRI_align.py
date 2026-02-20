@@ -37,6 +37,7 @@ class EEG_fMRI_Align(nn.Module):
             - param['Loss'] Dict: pending for loss function configuration (if needed)
                 - param['Loss']['mse_scale']: Scaling factor for MSE loss (default 1.0)
                 - param['Loss']['infonce_scale']: Scaling factor for InfoNCE loss (default 1.0)
+                - param['Loss']['proto_distill_scale']: Scaling factor for prototypical distillation loss (default 1.0)
                 - param['Loss']['temperature']: Temperature for InfoNCE loss (default 0.07)
                 - param['Loss']['normalize_fmri']: Whether to normalize fMRI embeddings to match the range of InfoNCE loss (default False)
         """
@@ -63,6 +64,7 @@ class EEG_fMRI_Align(nn.Module):
         # Loss function parameters
         self.mse_scale = param.get('Loss', {}).get('mse_scale', 1.0)
         self.infonce_scale = param.get('Loss', {}).get('infonce_scale', 1.0)
+        self.proto_distill_scale = param.get('Loss', {}).get('proto_distill_scale',  1.0)
         self.temperature = param.get('Loss', {}).get('temperature', 0.07)
         self.normalize_fmri = param.get('Loss', {}).get('normalize_fmri', True)
 
@@ -102,6 +104,7 @@ class EEG_fMRI_Align(nn.Module):
         parameters = {
             'mse_scale': self.mse_scale,
             'infonce_scale': self.infonce_scale,
+            'proto_distill_scale': self.proto_distill_scale,
             'temperature': self.temperature,
             'normalize_fmri': self.normalize_fmri
         }
@@ -119,12 +122,26 @@ class EEG_fMRI_Align(nn.Module):
         self.transformer.load_state_dict(loaded['transformer'])
         self.mse_scale = loaded['parameters']['mse_scale']
         self.infonce_scale = loaded['parameters']['infonce_scale']
+        self.proto_distill_scale = loaded['parameters']['proto_distill_scale']
         self.temperature = loaded['parameters']['temperature']
         self.normalize_fmri = loaded['parameters']['normalize_fmri']
 
     def calc_alignment_loss(self, 
                             aligned_embeds: torch.Tensor, 
-                            target_embeds: torch.Tensor) -> torch.Tensor:
+                            target_embeds: torch.Tensor,
+                            label: torch.Tensor) -> torch.Tensor:
+        
+        """
+        Args
+            aligned_embeds: Aligned EEG embeddings output by the model (batch, embedding_dim)
+            target_embeds: Target fMRI embeddings (batch, embedding_dim)
+            label: Clustered category labels for each sample (batch,)
+        Returns
+            total_loss: Combined loss for EEG-fMRI alignment
+            mse_loss: Mean Squared Error loss component
+            infonce_loss: InfoNCE loss component
+            proto_loss: Prototypical distillation loss component
+        """
 
         # MSE loss
         mse_loss = F.mse_loss(aligned_embeds, target_embeds)
@@ -140,10 +157,42 @@ class EEG_fMRI_Align(nn.Module):
         labels = torch.arange(pred_norm.size(0), device = pred_norm.device)
         infonce_loss = F.cross_entropy(logits, labels)
 
-        # Combined loss
-        total_loss = self.mse_scale * mse_loss + self.infonce_scale * infonce_loss
+        # Prototypical distillation loss
+        # Adapted from MultiEYE/process/finetune.py  (prototypical distill block)
+        #
+        # For every class c present in this batch, compute the mean embedding
+        # (prototype) of aligned_embeds and target_embeds separately, then
+        # penalize their MSE. 
+        # This encourages the EEG representation space to organize its 
+        # class-level geometry in the same way as fMRI.
+        #
+        # How this is mapped to the fundus/OCT setting in MultiEYE:
+        # aligned_embeds  ->  f_dist  (fundus prototype, shape: [n_cls, emb_dim])
+        # target_embeds   ->  o_dist  (OCT prototype, shape: [n_cls, emb_dim])
 
-        return total_loss, mse_loss, infonce_loss
+        exist_classes = torch.unique(label) # classes present in batch
+        n_cls = exist_classes.shape[0]
+        emb_dim = aligned_embeds.shape[1]
+        device = aligned_embeds.device
+
+        # Accumulators for prototypes and sample counts per class
+        eeg_proto  = torch.zeros(n_cls, emb_dim, device = device)   # f_dist
+        fmri_proto = torch.zeros(n_cls, emb_dim, device = device)   # o_dist
+        counts     = torch.zeros(n_cls,          device = device)   # f_num / o_num
+
+        for idx, cls in enumerate(exist_classes):
+            mask = (label == cls)                    # boolean mask for this class
+            eeg_proto[idx]  = aligned_embeds[mask].mean(dim = 0)
+            fmri_proto[idx] = target_embeds[mask].mean(dim = 0)
+            counts[idx]     = mask.sum()
+
+        # MSE between EEG and fMRI prototypes
+        proto_loss = F.mse_loss(eeg_proto, fmri_proto)
+
+        # Combined loss
+        total_loss = self.mse_scale * mse_loss + self.infonce_scale * infonce_loss + self.proto_distill_scale * proto_loss
+
+        return total_loss, mse_loss, infonce_loss, proto_loss
     
     def get_metrics_for_alignment(self, 
                                 aligned_embeds: torch.Tensor, 

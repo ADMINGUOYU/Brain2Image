@@ -68,6 +68,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--mlp_layers", type=int, default=2, help="Number of MLP layers")
     parser.add_argument("--mse_scale", type=float, default=1.0, help="MSE loss scale")
     parser.add_argument("--infonce_scale", type=float, default=1.0, help="InfoNCE loss scale")
+    parser.add_argument("--proto_distill_scale", type=float, default=1.0, help="Prototypical distillation loss scale")
     parser.add_argument("--temperature", type=float, default=0.07, help="InfoNCE temperature")
     parser.add_argument("--normalize_fmri", type=lambda x: x.lower() == 'true', default=True, help="Normalize fMRI to unit norm")
     parser.add_argument("--pooling_type", type=str, default='flatten', choices=['flatten', 'attention', 'multitoken_vit'],
@@ -119,18 +120,21 @@ def train(model: EEG_fMRI_Align,
             total_losses = []
             mse_losses = []
             infonce_losses = []
+            proto_losses = []
     
-            for EEG, fMRI in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}"):
+            # Data loaded from dataset: 
+            # 'eeg', 'fmri', 'label', 'things_img_idx', 'nsd_img_idx'
+            for EEG, fMRI, label, _ , _ in tqdm(data_loader['train'], desc = f"Epoch {epoch+1}/{num_epochs}"):
                 
                 # Move data to device
-                EEG, fMRI = EEG.to(device), fMRI.to(device)
+                EEG, fMRI, label = EEG.to(device), fMRI.to(device), label.to(device)
     
                 # Zero gradients
                 optimizer.zero_grad()
 
                 # Forward pass and compute loss
                 out = model.forward(EEG, fMRI)
-                loss, mse_loss, infonce_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze())
+                loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
 
                 # Backward pass
                 loss.backward()
@@ -149,44 +153,45 @@ def train(model: EEG_fMRI_Align,
                 total_losses.append(loss.item())
                 mse_losses.append(mse_loss.item())
                 infonce_losses.append(infonce_loss.item())
-
-            # Validation and logging
-            with torch.no_grad():
-                model.eval()
-                val_loss = 0.0
-                mse_val_loss = 0.0
-                infonce_val_loss = 0.0
-
-                for EEG, fMRI in data_loader['val']:
-                    EEG, fMRI = EEG.to(device), fMRI.to(device)
-                    out = model.forward(EEG, fMRI)
-                    loss, mse_loss, infonce_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze())
-                    val_loss += loss.item()
-                    mse_val_loss += mse_loss.item()
-                    infonce_val_loss += infonce_loss.item()
-
-                avg_val_loss = val_loss / len(data_loader['val'])
-                avg_mse_val_loss = mse_val_loss / len(data_loader['val'])
-                avg_infonce_val_loss = infonce_val_loss / len(data_loader['val'])
-    
+                proto_losses.append(proto_loss.item())
+            
             # end epoch training, compute average losses
             # verbose
             avg_train_loss = sum(total_losses) / len(total_losses)
             avg_mse_loss = sum(mse_losses) / len(mse_losses)
             avg_infonce_loss = sum(infonce_losses) / len(infonce_losses)
-            print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f} (MSE: {avg_mse_loss:.4f}, InfoNCE: {avg_infonce_loss:.4f})")
-    
-            # get optim state
-            optim_state = optimizer.state_dict()
+            avg_proto_loss = sum(proto_losses) / len(proto_losses)
+            print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f} (MSE: {avg_mse_loss:.4f}, InfoNCE: {avg_infonce_loss:.4f}, Proto: {avg_proto_loss:.4f})")
+            
+            # Validation - on training metrics
+            with torch.no_grad():
+                model.eval()
+                val_loss = 0.0
+                mse_val_loss = 0.0
+                infonce_val_loss = 0.0
+                proto_val_loss = 0.0
 
-            # Validation
-            model.eval()
+                for EEG, fMRI, label, _ , _ in data_loader['val']:
+                    EEG, fMRI, label = EEG.to(device), fMRI.to(device), label.to(device)
+                    out = model.forward(EEG, fMRI)
+                    loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
+                    val_loss += loss.item()
+                    mse_val_loss += mse_loss.item()
+                    infonce_val_loss += infonce_loss.item()
+                    proto_val_loss += proto_loss.item()
+
+                avg_val_loss = val_loss / len(data_loader['val'])
+                avg_proto_val_loss = proto_val_loss / len(data_loader['val'])
+                avg_mse_val_loss = mse_val_loss / len(data_loader['val'])
+                avg_infonce_val_loss = infonce_val_loss / len(data_loader['val'])
+
+            # Validation - on val metrics
             outputs = []
             fMRI_targets = []
             val_loss = 0.0
             with torch.no_grad():
-
-                for EEG, fMRI in tqdm(data_loader['val'], desc=f"Validation Epoch {epoch+1}"):
+                model.eval()
+                for EEG, fMRI, label, _ , _ in tqdm(data_loader['val'], desc=f"Validation Epoch {epoch+1}"):
 
                     # Move data to device
                     EEG, fMRI = EEG.to(device), fMRI.to(device)
@@ -195,7 +200,7 @@ def train(model: EEG_fMRI_Align,
                     out = model.forward(EEG, fMRI)
                     outputs.append(out)
                     fMRI_targets.append(fMRI)
-                    loss, _, _ = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze())
+                    loss, _, _, _ = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
                     val_loss += loss.item()
 
                 # concatenate outputs and compute metrics
@@ -219,6 +224,9 @@ def train(model: EEG_fMRI_Align,
                 model.save_model(checkpoint_path)
                 print(f"Saved best model to {checkpoint_path}")
 
+            # get optim state
+            optim_state = optimizer.state_dict()
+
             # Tensor board logging
             if logger is not None:
                 logger.add_scalar('Loss/Train', avg_train_loss, epoch)
@@ -227,10 +235,17 @@ def train(model: EEG_fMRI_Align,
                 logger.add_scalar('MSE_Loss/Val', avg_mse_val_loss, epoch)
                 logger.add_scalar('InfoNCE_Loss/Train', avg_infonce_loss, epoch)
                 logger.add_scalar('InfoNCE_Loss/Val', avg_infonce_val_loss, epoch)
+                logger.add_scalar('Proto_Distill_Loss/Train', avg_proto_loss, epoch)
+                logger.add_scalar('Proto_Distill_Loss/Val', avg_proto_val_loss, epoch)
                 logger.add_scalar('Metrics/MSE', mse, epoch)
                 logger.add_scalar('Metrics/Cosine_Similarity', cos_sim, epoch)
                 logger.add_scalar('Metrics/Retrieval_Accuracy', retrieval_acc, epoch)
+                # Log optimizer learning rate
+                param_groups = optim_state['param_groups']
+                for i, group in enumerate(param_groups):
+                    logger.add_scalar(f'Learning_Rate/Group_{i}', group['lr'], epoch)
 
+# testing loop
 def test(model: EEG_fMRI_Align,
          data_loader: torch.utils.data.DataLoader,
          device: torch.device,
@@ -250,7 +265,7 @@ def test(model: EEG_fMRI_Align,
     fMRI_targets = []
     with torch.no_grad():
 
-        for EEG, fMRI in tqdm(data_loader, desc="Testing"):
+        for EEG, fMRI, _ , _ , _ in tqdm(data_loader, desc = "Testing"):
 
             # Move data to device
             EEG, fMRI = EEG.to(device), fMRI.to(device)
@@ -305,7 +320,7 @@ if __name__ == "__main__":
     logger = SummaryWriter(log_dir=tensorboard_dir)
 
     # Get data loaders
-    data_loader = get_data_loader(args.datasets_dir, batch_size=args.batch_size, normalize_fmri=args.normalize_fmri)
+    data_loader = get_data_loader(args.datasets_dir, batch_size = args.batch_size, normalize_fmri = args.normalize_fmri)
 
     # Create model config dictionary
     model_config = {
@@ -324,6 +339,7 @@ if __name__ == "__main__":
         'Loss': {
             'mse_scale': args.mse_scale,
             'infonce_scale': args.infonce_scale,
+            'proto_distill_scale': args.proto_distill_scale,
             'temperature': args.temperature,
             'normalize_fmri': args.normalize_fmri
         },

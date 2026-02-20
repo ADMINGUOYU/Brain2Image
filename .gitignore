@@ -3,6 +3,9 @@ datasets/*
 # Keep *.py in ./datasets
 !datasets/*.py
 
+# Ignore ./runs directory
+runs/
+
 # Ignore IDE files
 .idea/
 .vscode/

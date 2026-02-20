@@ -81,6 +81,8 @@ class EEG_fMRI_Align_Dataset(Dataset):
         label = np.array([x[2] for x in batch])
         things_img_idx = np.array([x[3] for x in batch])
         nsd_img_idx = np.array([x[4] for x in batch])
+        # Make EEG in shape (batch_size, num_channels, 1, num_timepoints)
+        EEG = EEG.reshape(EEG.shape[0], EEG.shape[1], 1, EEG.shape[2])
         return torch.from_numpy(EEG).float(), torch.from_numpy(fMRI).float(), torch.from_numpy(label).long(), torch.from_numpy(things_img_idx).long(), torch.from_numpy(nsd_img_idx).long()
 
 # helper function to get data loaders
