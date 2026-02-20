@@ -22,9 +22,9 @@
 # import os
 import os
 # set transformers cache directory
-os.environ['TRANSFORMERS_CACHE'] = 'datasets/transformers_cache'
-os.environ['HF_HOME'] = 'datasets/transformers_cache'
-os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
+os.environ['TRANSFORMERS_CACHE'] = '/mnt/afs/250010218/hf_cache'
+os.environ['HF_HOME'] = '/mnt/afs/250010218/hf_cache'
+os.environ['HF_HUB_CACHE'] = '/mnt/afs/250010218/hf_cache'
 
 # import necessary libraries
 import torch
@@ -161,6 +161,7 @@ def process_nsd_fmri_image_all_subjects():
                     inputs = processor(images = image, return_tensors = 'pt').to(device)
                     with torch.no_grad():
                         image_embedding = model.get_image_features(**inputs).pooler_output.cpu().squeeze().numpy()
+                        # image_embedding = model.get_image_features(**inputs).cpu().squeeze().numpy()
                     # assert the shape of the image embedding is (768,)
                     assert image_embedding.shape == (768,), f"Unexpected image embedding shape: {image_embedding.shape}"
                     # store the image data in all_images_data

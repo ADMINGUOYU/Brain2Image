@@ -79,7 +79,8 @@ CMD="python -m train.train_EEG_fMRI_align \
     --num_transformer_layers $NUM_TRANSFORMER_LAYERS \
     --num_attention_heads $NUM_ATTENTION_HEADS \
     --alignment_attention_heads $ALIGNMENT_ATTENTION_HEADS \
-    --alignment_attention_dropout $ALIGNMENT_ATTENTION_DROPOUT"
+    --alignment_attention_dropout $ALIGNMENT_ATTENTION_DROPOUT \
+    --script_path $0"
 
 # Add conditional arguments
 if [ -n "$FOUNDATION_DIR" ]; then

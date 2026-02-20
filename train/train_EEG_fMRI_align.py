@@ -28,6 +28,7 @@ import typing
 # import utilities
 from time import time
 import os
+import shutil
 
 # get parsed arguments
 def get_args() -> argparse.Namespace:
@@ -56,6 +57,7 @@ def get_args() -> argparse.Namespace:
 
     # Checkpoints (full checkpoint loading - please don't specify if you used foundation weights)
     parser.add_argument('--model_dir', type=str, default=None, help='full model dir for loading (default: None)')
+    parser.add_argument('--script_path', type=str, default=None, help='path to the bash script used to launch training (saved for reproducibility)')
 
     # Dataset settings
     parser.add_argument('--datasets_dir', type=str,
@@ -315,6 +317,11 @@ if __name__ == "__main__":
     ckpt_dir = f"{log_dir}/checkpoints"
     os.makedirs(tensorboard_dir, exist_ok=True)
     os.makedirs(ckpt_dir, exist_ok=True)
+
+    # Save the launch script for reproducibility
+    if args.script_path and os.path.isfile(args.script_path):
+        shutil.copy(args.script_path, f"{log_dir}/run_script.sh")
+        print(f"Saved launch script to {log_dir}/run_script.sh")
     
     # Create tensorboard logger
     logger = SummaryWriter(log_dir=tensorboard_dir)

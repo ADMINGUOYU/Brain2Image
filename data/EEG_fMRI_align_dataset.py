@@ -127,7 +127,7 @@ def get_data_loader(datasets_dir: str,
 # Test code
 if __name__ == "__main__":
     # Example usage
-    datasets_dir = 'path/to/dataset/dir'  # Update with actual path
+    datasets_dir = 'datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01'  # Update with actual path
     batch_size = 16
     data_loader = get_data_loader(datasets_dir, batch_size)
 
