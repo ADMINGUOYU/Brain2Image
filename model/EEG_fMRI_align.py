@@ -235,6 +235,7 @@ if __name__ == "__main__":
     fmri_feature_dim = 4096
     dummy_eeg_input = torch.randn(batch_size, 63, 1, 200)
     dummy_fmri_input = torch.randn(batch_size, fmri_seq_len, fmri_feature_dim)
+    dummy_label = torch.tensor([0, 1, 0, 1])  # Example class labels for prototypical distillation loss
 
     # Create dummy param object
     param = {
@@ -251,6 +252,7 @@ if __name__ == "__main__":
         'Loss': {
             'mse_scale': 1.0,
             'infonce_scale': 1.0,
+            'proto_distill_scale': 1.0,
             'temperature': 0.07,
             'normalize_fmri': True
         }
@@ -263,11 +265,12 @@ if __name__ == "__main__":
     output = model(dummy_eeg_input, dummy_fmri_input)
     print("Output shape:", output.shape)
 
-    # Test Loss (pred -> output, target -> dummy_fmri_input)
+    # Test Loss (pred -> output, target -> dummy_fmri_input, label -> dummy_label)
     # squeeze first
     dummy_fmri_input = dummy_fmri_input.squeeze(1)  # (batch, fmri_feature_dim)
     output = output.squeeze(1)  # (batch, embedding_dim)
-    loss, mse_loss, infonce_loss = model.calc_alignment_loss(output, dummy_fmri_input)
+    loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(output, dummy_fmri_input, dummy_label)
     print("Total Loss:", loss.item())
     print("MSE Loss:", mse_loss.item())
     print("InfoNCE Loss:", infonce_loss.item())
+    print("Proto Distill Loss:", proto_loss.item())
