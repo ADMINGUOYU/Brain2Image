@@ -85,9 +85,10 @@ class EEG_fMRI_Align(nn.Module):
         # key, query shape (batch, 4096)
         # we reshape it to (batch, 1, 4096) to be compatible with the attention module
         eeg_embeds = eeg_embeds.unsqueeze(1)  # (batch, 1, embedding_dim)
-        aligned_embeds, _ = self.transformer.forward(query = fmri_input, 
-                                                    key = eeg_embeds, 
+        aligned_embeds, _ = self.transformer.forward(query = fmri_input,
+                                                    key = eeg_embeds,
                                                     value = eeg_embeds)  # (batch, embedding_dim)
+        aligned_embeds = F.normalize(aligned_embeds, dim=-1)  # unit-norm output
         return aligned_embeds
 
     def save_model(self, path: str):
@@ -143,18 +144,16 @@ class EEG_fMRI_Align(nn.Module):
             proto_loss: Prototypical distillation loss component
         """
 
-        # MSE loss
-        mse_loss = F.mse_loss(aligned_embeds, target_embeds)
-
-        # Scale MSE by 1000 if fMRI is normalized to match InfoNCE range
+        # Normalize target embeddings to unit sphere if configured
         if self.normalize_fmri:
-            mse_loss = mse_loss * 1000
+            target_embeds = F.normalize(target_embeds, dim=1)
 
-        # InfoNCE loss
-        pred_norm = F.normalize(aligned_embeds, dim=1)
-        target_norm = F.normalize(target_embeds, dim=1)
-        logits = torch.matmul(pred_norm, target_norm.T) / self.temperature
-        labels = torch.arange(pred_norm.size(0), device = pred_norm.device)
+        # MSE loss: sum over feature dim, mean over batch → values in [0, 4] for unit-norm vectors
+        mse_loss = F.mse_loss(aligned_embeds, target_embeds, reduction='none').sum(dim=1).mean()
+
+        # InfoNCE loss (aligned_embeds already unit-norm from forward; target_embeds normalized above)
+        logits = torch.matmul(aligned_embeds, target_embeds.T) / self.temperature
+        labels = torch.arange(aligned_embeds.size(0), device=aligned_embeds.device)
         infonce_loss = F.cross_entropy(logits, labels)
 
         # Prototypical distillation loss
@@ -186,8 +185,10 @@ class EEG_fMRI_Align(nn.Module):
             fmri_proto[idx] = target_embeds[mask].mean(dim = 0)
             counts[idx]     = mask.sum()
 
-        # MSE between EEG and fMRI prototypes
-        proto_loss = F.mse_loss(eeg_proto, fmri_proto)
+        # MSE between EEG and fMRI prototypes (re-normalize after mean to restore unit sphere)
+        eeg_proto  = F.normalize(eeg_proto,  dim=1)
+        fmri_proto = F.normalize(fmri_proto, dim=1)
+        proto_loss = F.mse_loss(eeg_proto, fmri_proto, reduction='none').sum(dim=1).mean()
 
         # Combined loss
         total_loss = self.mse_scale * mse_loss + self.infonce_scale * infonce_loss + self.proto_distill_scale * proto_loss
@@ -208,14 +209,14 @@ class EEG_fMRI_Align(nn.Module):
             cos_sim: Average cosine similarity between aligned EEG embeddings and target fMRI embeddings
             retrieval_acc: Top-1 retrieval accuracy based on cosine similaritys
         """
-        # MSE
-        mse = F.mse_loss(aligned_embeds, target_embeds).item()
-
-        # Scale MSE by 1000 if fMRI is normalized to match training loss range
+        # Normalize target embeddings to unit sphere if configured
         if self.normalize_fmri:
-            mse = mse * 1000
+            target_embeds = F.normalize(target_embeds, dim=1)
 
-        # Cosine similarity
+        # MSE: sum over feature dim, mean over batch → consistent with training loss
+        mse = F.mse_loss(aligned_embeds, target_embeds, reduction='none').sum(dim=1).mean().item()
+
+        # Cosine similarity (aligned_embeds already unit-norm)
         cos_sim = F.cosine_similarity(aligned_embeds, target_embeds, dim=1).mean().item()
 
         # Top-1 retrieval accuracy
