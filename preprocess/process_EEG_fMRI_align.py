@@ -27,8 +27,8 @@
 #     'eeg': list of EEG data (num_samples, num_channels, num_timepoints)
 #     'fmri': list of fMRI data (num_samples, embedding_dim)
 #     'label': list of labels (image clustered category)
-#     'eeg_img_idx': list of image indices corresponding to each sample
-#     'fmri_img_idx': list of image indices corresponding to each sample
+#     'things_img_idx': list of image indices corresponding to each sample
+#     'nsd_img_idx': list of image indices corresponding to each sample
 # }
 # 'val': { ... }
 # 'test': { ... }
