@@ -61,7 +61,7 @@ TARGET_FREQ = 200
 
 # Mean processing
 eeg_take_mean = False
-fmri_take_mean = True
+fmri_take_mean = False
 
 # Dataset mix mode
 # NOTE: Mean processing will reduce number of samples to 1 !!!
