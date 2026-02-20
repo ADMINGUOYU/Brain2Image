@@ -8,6 +8,10 @@
 # We'll also index every unique images in 'img_set_path' and save the
 # index in a pandas.DataFrame for later use. (image_index / image_data / image_path / image_embedding / class_label / split)
 
+# WARNING: 
+#     - training: num of trails =  4 per image
+#     - testing:  num of trails = 80 per image
+
 # --------------- Start of configuration --------------- #
 
 # import os
@@ -165,8 +169,8 @@ def process_things_eeg_data(subject_wanted: list) -> None:
 
     # we define a function to process the data for one subject and one split (train/test)
     def process_data(data: dict, subject: str, split: str, image_df: pd.DataFrame) -> pd.DataFrame:
-            eeg = data['eeg']  # shape: (16540, 4, 63, 250) for train, (200, 4, 63, 250) for test
-            img_path: np.ndarray[str] = data['img']  # shape: (16540, 4) for train, (200, 4) for test
+            eeg = data['eeg']  # shape: (16540, 4, 63, 250) for train, (200, 80, 63, 250) for test
+            img_path: np.ndarray[str] = data['img']  # shape: (16540, 4) for train, (200, 80) for test
 
             # we loop through the samples and create a dataframe
             # 4 recordings stored together
