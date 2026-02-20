@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     # Iterate through one batch of training data
     for EEG_batch, fMRI_batch, label_batch, things_img_idx_batch, nsd_img_idx_batch in data_loader['train']:
-        print(f"EEG batch shape: {EEG_batch.shape}")  # Expected: (batch_size, 63, 1, 200)
+        print(f"EEG batch shape: {EEG_batch.shape}")  # Expected: (batch_size, 63, 200)
         print(f"fMRI batch shape: {fMRI_batch.shape}")  # Expected: (batch_size, 4096)
         print(f"label batch shape: {label_batch.shape}")
         print(f"things_img_idx batch shape: {things_img_idx_batch.shape}")
