@@ -22,3 +22,4 @@ env/
 
 # Ignore Jupyter Notebook checkpoints
 .ipynb_checkpoints/
+test.py

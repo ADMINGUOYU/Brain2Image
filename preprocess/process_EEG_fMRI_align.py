@@ -57,7 +57,8 @@ processed_dir = "datasets/processed"
 subjects =  [('sub-01', 'sub-01')]
 
 # EEG resampling parameters
-TARGET_FREQ = 200
+TARGET_FREQ = 250 # for ATM
+# TARGET_FREQ = 200 # for CBraMod
 
 # Mean processing
 eeg_take_mean = False
@@ -275,7 +276,7 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
     print(f"Split data into {len(training_indices)} training samples, {len(val_indices)} validation samples, and {len(test_indices)} test samples.")
 
     # We init lmdb
-    output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subject}"
+    output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subject}_{TARGET_FREQ}Hz"
     os.makedirs(output_dir, exist_ok = True)
     # Remove output_dir if already exists to avoid confusion
     if os.path.exists(output_dir):

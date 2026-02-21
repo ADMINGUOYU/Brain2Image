@@ -18,7 +18,7 @@ DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-0
 # Model Configuration
 FROZEN="false"  # Set to "true" to freeze EEG encoder
 USE_PRETRAINED_WEIGHTS="true"
-FOUNDATION_DIR="datasets/processed/atms/sub-01.pth"  # Required if USE_PRETRAINED_WEIGHTS=true
+FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"  # CBraMod weights; use atms/sub-01.pth for ATMS backbone
 MODEL_DIR=""  # Only set if loading full checkpoint
 
 # Architecture Parameters
@@ -28,10 +28,7 @@ PROTO_DISTILL_SCALE=5.0
 TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
 # Backbone
-EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
-# Alignment attention parameters
-ALIGNMENT_ATTENTION_HEADS=4
-ALIGNMENT_ATTENTION_DROPOUT=0.25
+EEG_ENCODER_TYPE="CBraMod"  # Options: "CBraMod", "ATMS"
 
 # Please configure one of the following
 # ---------------------------------------------------- #
@@ -46,7 +43,7 @@ ATMS_DROPOUT=0.25
 ATMS_FACTOR=1
 # ---------------------------------------------------- #
 # CBraMod-specific parameters (if EEG_ENCODER_TYPE=CBraMod)
-POOLING_TYPE="attention"  # Options: "attention", "multitoken_vit", "flatten"
+POOLING_TYPE="multitoken_vit"  # Options: "attention", "multitoken_vit", "flatten"
 # ---  attention and flatten pooling
 EMBEDDING_DIM=4096
 MLP_LAYERS=2
@@ -98,14 +95,12 @@ CMD="python -m train.train_EEG_fMRI_align \
     --atms_n_heads $ATMS_N_HEADS \
     --atms_d_ff $ATMS_D_FF \
     --atms_dropout $ATMS_DROPOUT \
-    --atms_factor $ATMS_FACTOR
+    --atms_factor $ATMS_FACTOR \
     --mse_scale $MSE_SCALE \
     --infonce_scale $INFONCE_SCALE \
     --proto_distill_scale $PROTO_DISTILL_SCALE \
     --temperature $TEMPERATURE \
     --normalize_fmri $NORMALIZE_FMRI \
-    --alignment_attention_heads $ALIGNMENT_ATTENTION_HEADS \
-    --alignment_attention_dropout $ALIGNMENT_ATTENTION_DROPOUT \
     --script_path $0"
 
 # Add conditional arguments

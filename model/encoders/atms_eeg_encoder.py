@@ -419,8 +419,6 @@ class ATMS_EEG_Encoder(nn.Module):
         d_ff        = param.get("d_ff",         256)
         dropout     = param.get("dropout",      0.25)
         factor      = param.get("factor",       1)
-        out_mlp_dim = param.get("out_mlp_dim", None)
-
         # Initialize components
 
         # -> Inverted-variable Transformer
@@ -459,18 +457,6 @@ class ATMS_EEG_Encoder(nn.Module):
         # NOTE: this is accessible outside class
         self.output_dim = proj_dim
 
-        # If an output MLP head is specified, add it
-        if out_mlp_dim is not None:
-            self.output_mlp = nn.Sequential(
-                nn.Linear(proj_dim, out_mlp_dim),
-                nn.GELU(),
-                nn.Linear(out_mlp_dim, out_mlp_dim),
-            )
-            # update output dimension to reflect MLP head
-            self.output_dim = out_mlp_dim
-        else:
-            self.output_mlp = None
-
         # Load pretrained weights if specified
         if param.get('use_pretrained_weights', False):
             map_location = torch.device(f'cuda:{param['cuda']}') if torch.cuda.is_available() else 'cpu'
@@ -501,8 +487,6 @@ class ATMS_EEG_Encoder(nn.Module):
         x = self.patch_embed.forward(x)        # (batch_size, n_patches, emb_size)
         x = x.contiguous().view(x.size(0), -1) # (batch_size, n_patches * emb_size)
         x = self.proj.forward(x)               # (batch_size, proj_dim)
-        if self.output_mlp is not None:
-            x = self.output_mlp.forward(x)      # (batch_size, out_mlp_dim)
         return x
 
     def load_atms_weights(self, weight_path: str, map_location = None):
@@ -576,7 +560,6 @@ if __name__ == "__main__":
         "d_ff":         256,
         "dropout":      0.25,
         "factor":       1,
-        "out_mlp_dim":  4096,
     }
 
     # Test initialization
@@ -588,5 +571,5 @@ if __name__ == "__main__":
 
     dummy = torch.randn(8, param["num_channels"], 1, param["seq_len"])  # (batch, n_channels, time_step, seq_len)
     out   = encoder.forward(dummy)
-    print(f"input  shape : {dummy.shape}")    # (8, 63, 250)
-    print(f"output shape : {out.shape}")      # (8, 4096)
+    print(f"input  shape : {dummy.shape}")    # (8, 63, 1, 250)
+    print(f"output shape : {out.shape}")      # (8, 1024)

@@ -82,8 +82,6 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--proto_distill_scale", type=float, default=1.0, help="Prototypical distillation loss scale")
     parser.add_argument("--temperature", type=float, default=0.07, help="InfoNCE temperature")
     parser.add_argument("--normalize_fmri", type=lambda x: x.lower() == 'true', default=True, help="Normalize fMRI to unit norm")
-    parser.add_argument("--alignment_attention_heads", type=int, default=4, help="Number of attention heads for alignment attention")
-    parser.add_argument('--alignment_attention_dropout', type=float, default=0.25, help='Dropout for alignment attention')
     
     # WARNING: These parameters are baked in CBraMod module
     # TODO: refactor and pull these out of CBraMod backbone
@@ -149,7 +147,7 @@ def train(model: EEG_fMRI_Align,
                 optimizer.zero_grad()
 
                 # Forward pass and compute loss
-                out = model.forward(EEG, fMRI)
+                out = model.forward(EEG)
                 loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
 
                 # Backward pass
@@ -189,7 +187,7 @@ def train(model: EEG_fMRI_Align,
 
                 for EEG, fMRI, label, _ , _ in data_loader['val']:
                     EEG, fMRI, label = EEG.to(device), fMRI.to(device), label.to(device)
-                    out = model.forward(EEG, fMRI)
+                    out = model.forward(EEG)
                     loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
                     val_loss += loss.item()
                     mse_val_loss += mse_loss.item()
@@ -213,7 +211,7 @@ def train(model: EEG_fMRI_Align,
                     EEG, fMRI = EEG.to(device), fMRI.to(device)
 
                     # Forward pass and compute loss
-                    out = model.forward(EEG, fMRI)
+                    out = model.forward(EEG)
                     outputs.append(out)
                     fMRI_targets.append(fMRI)
                     loss, _, _, _ = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
@@ -288,7 +286,7 @@ def test(model: EEG_fMRI_Align,
             EEG, fMRI = EEG.to(device), fMRI.to(device)
 
             # Forward pass
-            out = model.forward(EEG, fMRI)
+            out = model.forward(EEG)
             outputs.append(out)
             fMRI_targets.append(fMRI)
 
@@ -391,10 +389,6 @@ if __name__ == "__main__":
             'proto_distill_scale': args.proto_distill_scale,
             'temperature': args.temperature,
             'normalize_fmri': args.normalize_fmri
-        },
-        'Attention_Merge': {
-            'alignment_attention_heads': args.alignment_attention_heads,
-            'alignment_attention_dropout': args.alignment_attention_dropout
         }
     }
 
