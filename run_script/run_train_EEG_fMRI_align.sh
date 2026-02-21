@@ -27,6 +27,25 @@ INFONCE_SCALE=1.0
 PROTO_DISTILL_SCALE=5.0
 TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
+# Backbone
+EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
+# Alignment attention parameters
+ALIGNMENT_ATTENTION_HEADS=4
+ALIGNMENT_ATTENTION_DROPOUT=0.25
+
+# Please configure one of the following
+# ---------------------------------------------------- #
+# ATMS-specific parameters (if EEG_ENCODER_TYPE=ATMS)
+ATMS_EMB_SIZE=40
+ATMS_PROJ_DIM=4096
+ATMS_DROP_PROJ=0.5
+ATMS_D_MODEL=250
+ATMS_N_HEADS=4
+ATMS_D_FF=256
+ATMS_DROPOUT=0.25
+ATMS_FACTOR=1
+# ---------------------------------------------------- #
+# CBraMod-specific parameters (if EEG_ENCODER_TYPE=CBraMod)
 POOLING_TYPE="attention"  # Options: "attention", "multitoken_vit", "flatten"
 # ---  attention and flatten pooling
 EMBEDDING_DIM=4096
@@ -37,9 +56,7 @@ ATTENTION_HEADS=16
 NUM_TOKENS=4
 NUM_TRANSFORMER_LAYERS=4
 NUM_ATTENTION_HEADS=4
-# Alignment attention parameters
-ALIGNMENT_ATTENTION_HEADS=4
-ALIGNMENT_ATTENTION_DROPOUT=0.25
+# ---------------------------------------------------- #
 
 # Dependency Checks
 if [ -n "$MODEL_DIR" ] && [ -n "$FOUNDATION_DIR" ]; then
@@ -63,21 +80,30 @@ CMD="python -m train.train_EEG_fMRI_align \
     --weight_decay $WEIGHT_DECAY \
     --optimizer $OPTIMIZER \
     --clip_value $CLIP_VALUE \
+    --backbone $EEG_ENCODER_TYPE \
     --frozen $FROZEN \
     --use_pretrained_weights $USE_PRETRAINED_WEIGHTS \
     --datasets_dir $DATASETS_DIR \
     --embedding_dim $EMBEDDING_DIM \
     --mlp_layers $MLP_LAYERS \
-    --mse_scale $MSE_SCALE \
-    --infonce_scale $INFONCE_SCALE \
-    --proto_distill_scale $PROTO_DISTILL_SCALE \
-    --temperature $TEMPERATURE \
-    --normalize_fmri $NORMALIZE_FMRI \
     --pooling_type $POOLING_TYPE \
     --attention_heads $ATTENTION_HEADS \
     --num_tokens $NUM_TOKENS \
     --num_transformer_layers $NUM_TRANSFORMER_LAYERS \
     --num_attention_heads $NUM_ATTENTION_HEADS \
+    --atms_emb_size $ATMS_EMB_SIZE \
+    --atms_proj_dim $ATMS_PROJ_DIM \
+    --atms_drop_proj $ATMS_DROP_PROJ \
+    --atms_d_model $ATMS_D_MODEL \
+    --atms_n_heads $ATMS_N_HEADS \
+    --atms_d_ff $ATMS_D_FF \
+    --atms_dropout $ATMS_DROPOUT \
+    --atms_factor $ATMS_FACTOR
+    --mse_scale $MSE_SCALE \
+    --infonce_scale $INFONCE_SCALE \
+    --proto_distill_scale $PROTO_DISTILL_SCALE \
+    --temperature $TEMPERATURE \
+    --normalize_fmri $NORMALIZE_FMRI \
     --alignment_attention_heads $ALIGNMENT_ATTENTION_HEADS \
     --alignment_attention_dropout $ALIGNMENT_ATTENTION_DROPOUT \
     --script_path $0"

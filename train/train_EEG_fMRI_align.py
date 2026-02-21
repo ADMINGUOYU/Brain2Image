@@ -46,6 +46,9 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--optimizer', type=str, default='AdamW', help='optimizer (AdamW, SGD)')
     parser.add_argument('--clip_value', type=float, default=1, help='gradient clipping value (default: 1)')
 
+    # Encoder backbone settings
+    parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'], help='EEG encoder backbone (default: CBraMod)')
+
     # CBraMod backbone settings
     parser.add_argument('--frozen', type=lambda x: x.lower() == 'true',
                         default=False, help='frozen')  # whether to freeze the EEG encoder during training
@@ -54,6 +57,16 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--foundation_dir', type=str,
                         default=None,
                         help='CBraMod foundation model dir for loading pretrained weights (default: None)')
+    
+    # ATMS backbone settings
+    parser.add_argument('--atms_emb_size', type=int, default=40, help='ATMS embedding size (default: 40)')
+    parser.add_argument('--atms_proj_dim', type=int, default=3200, help='ATMS projection dimension (default: 3200)')
+    parser.add_argument('--atms_drop_proj', type=float, default=0.5, help='ATMS projection head dropout (default: 0.5)')
+    parser.add_argument('--atms_d_model', type=int, default=250, help='ATMS iTransformer d_model (default: 250)')
+    parser.add_argument('--atms_n_heads', type=int, default=4, help='ATMS iTransformer number of heads (default: 4)')
+    parser.add_argument('--atms_d_ff', type=int, default=256, help='ATMS iTransformer feedforward dimension (default: 256)')
+    parser.add_argument('--atms_dropout', type=float, default=0.25, help='ATMS iTransformer dropout (default: 0.25)')
+    parser.add_argument('--atms_factor', type=int, default=1, help='ATMS iTransformer factor (default: 1)')
 
     # Checkpoints (full checkpoint loading - please don't specify if you used foundation weights)
     parser.add_argument('--model_dir', type=str, default=None, help='full model dir for loading (default: None)')
@@ -332,8 +345,10 @@ if __name__ == "__main__":
     data_loader = get_data_loader(args.datasets_dir, batch_size = args.batch_size, normalize_fmri = args.normalize_fmri)
 
     # Create model config dictionary
-    model_config = {
-        'EEG_Encoder': {
+    # depends on the backbone
+    if args.backbone == 'CBraMod':
+        encoder_config = {
+            'encoder_type': 'CBraMod',
             'cuda' : args.cuda,
             'use_pretrained_weights': args.use_pretrained_weights,
             'foundation_dir': args.foundation_dir,
@@ -344,7 +359,27 @@ if __name__ == "__main__":
             'num_attention_heads': args.num_attention_heads,
             'mlp_layers': args.mlp_layers,
             'embedding_dim': args.embedding_dim
-        },
+        }
+    elif args.backbone == 'ATMS':
+        encoder_config = {
+            'encoder_type': 'ATMS',
+            "num_channels": 63,
+            "seq_len":      200,
+            "emb_size":     args.atms_emb_size,
+            "proj_dim":     args.atms_proj_dim,
+            "drop_proj":    args.atms_drop_proj,
+            "d_model":      args.atms_d_model,
+            "n_heads":      args.atms_n_heads,
+            "e_layers":     1,
+            "d_ff":         args.atms_d_ff,
+            "dropout":      args.atms_dropout,
+            "factor":       args.atms_factor,
+        }
+    else:
+        raise ValueError(f"Unsupported backbone type: {args.backbone}")
+    # Build model config
+    model_config = {
+        'EEG_Encoder': encoder_config,
         'Loss': {
             'mse_scale': args.mse_scale,
             'infonce_scale': args.infonce_scale,
