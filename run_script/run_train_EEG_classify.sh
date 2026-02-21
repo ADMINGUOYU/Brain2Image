@@ -6,11 +6,10 @@ CUDA=0
 EPOCHS=100
 BATCH_SIZE=64
 LR=1e-4
-MULTI_LR="true"  # Set to "false" to disable multi-learning rate
+MULTI_LR="true"
 WEIGHT_DECAY=5e-2
 OPTIMIZER="AdamW"
 CLIP_VALUE=1.0
-DROPOUT=0.25
 
 # Backbone — change this to switch between models
 EEG_ENCODER_TYPE="CBraMod"  # Options: "CBraMod", "ATMS"
@@ -28,40 +27,26 @@ else
 fi
 
 # Model Configuration
-FROZEN="false"  # Set to "true" to freeze EEG encoder
+FROZEN="false"  # Set to "true" to freeze EEG encoder (linear probe)
 USE_PRETRAINED_WEIGHTS="true"
 MODEL_DIR=""  # Only set if loading full checkpoint
 
-# Loss / Training Parameters
-MSE_SCALE=5.0
-INFONCE_SCALE=1.0
-PROTO_DISTILL_SCALE=5.0
-TEMPERATURE=0.1
-NORMALIZE_FMRI="true"
+# Classification Head Parameters
+NUM_CLASSES=5
+HIDDEN_DIM=512
+DROPOUT=0.3
+MLP_LAYERS=2
 
 # Please configure one of the following
 # ---------------------------------------------------- #
 # ATMS-specific parameters (if EEG_ENCODER_TYPE=ATMS)
 ATMS_EMB_SIZE=40
-OUT_MLP_DIM=4096
 ATMS_DROP_PROJ=0.5
 ATMS_D_MODEL=250
 ATMS_N_HEADS=4
 ATMS_D_FF=256
 ATMS_DROPOUT=0.25
 ATMS_FACTOR=1
-# ---------------------------------------------------- #
-# CBraMod-specific parameters (if EEG_ENCODER_TYPE=CBraMod)
-POOLING_TYPE="multitoken_vit"  # Options: "attention", "multitoken_vit", "flatten"
-# ---  attention and flatten pooling
-EMBEDDING_DIM=4096
-MLP_LAYERS=2
-# --- attention pooling
-ATTENTION_HEADS=16
-# --- multitoken_vit pooling
-NUM_TOKENS=4
-NUM_TRANSFORMER_LAYERS=4
-NUM_ATTENTION_HEADS=4
 # ---------------------------------------------------- #
 
 # Dependency Checks
@@ -76,7 +61,7 @@ if [ "$USE_PRETRAINED_WEIGHTS" = "true" ] && [ -z "$FOUNDATION_DIR" ]; then
 fi
 
 # Build Command
-CMD="python -m train.train_EEG_fMRI_align \
+CMD="python -m train.train_EEG_classify \
     --seed $SEED \
     --cuda $CUDA \
     --epochs $EPOCHS \
@@ -90,26 +75,17 @@ CMD="python -m train.train_EEG_fMRI_align \
     --frozen $FROZEN \
     --use_pretrained_weights $USE_PRETRAINED_WEIGHTS \
     --datasets_dir $DATASETS_DIR \
-    --embedding_dim $EMBEDDING_DIM \
+    --num_classes $NUM_CLASSES \
+    --hidden_dim $HIDDEN_DIM \
+    --dropout $DROPOUT \
     --mlp_layers $MLP_LAYERS \
-    --pooling_type $POOLING_TYPE \
-    --attention_heads $ATTENTION_HEADS \
-    --num_tokens $NUM_TOKENS \
-    --num_transformer_layers $NUM_TRANSFORMER_LAYERS \
-    --num_attention_heads $NUM_ATTENTION_HEADS \
     --atms_emb_size $ATMS_EMB_SIZE \
-    --out_mlp_dim $OUT_MLP_DIM \
     --atms_drop_proj $ATMS_DROP_PROJ \
     --atms_d_model $ATMS_D_MODEL \
     --atms_n_heads $ATMS_N_HEADS \
     --atms_d_ff $ATMS_D_FF \
     --atms_dropout $ATMS_DROPOUT \
     --atms_factor $ATMS_FACTOR \
-    --mse_scale $MSE_SCALE \
-    --infonce_scale $INFONCE_SCALE \
-    --proto_distill_scale $PROTO_DISTILL_SCALE \
-    --temperature $TEMPERATURE \
-    --normalize_fmri $NORMALIZE_FMRI \
     --script_path $0"
 
 # Add conditional arguments
