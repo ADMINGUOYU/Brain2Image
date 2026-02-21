@@ -84,9 +84,9 @@ class EEG_fMRI_Align(nn.Module):
         # key, query shape (batch, 4096)
         # we reshape it to (batch, 1, 4096) to be compatible with the attention module
         eeg_embeds = eeg_embeds.unsqueeze(1)  # (batch, 1, embedding_dim)
-        aligned_embeds, _ = self.transformer.forward(query = fmri_input,
+        aligned_embeds, _ = self.transformer.forward(query = fmri_input.unsqueeze(1),
                                                     key = eeg_embeds,
-                                                    value = eeg_embeds)  # (batch, embedding_dim)
+                                                    value = eeg_embeds)  # (batch, 1, embedding_dim)
         aligned_embeds = F.normalize(aligned_embeds, dim=-1)  # unit-norm output
         return aligned_embeds
 
@@ -237,10 +237,9 @@ class EEG_fMRI_Align(nn.Module):
 if __name__ == "__main__":
     # Create dummy input
     batch_size = 4
-    fmri_seq_len = 1
     fmri_feature_dim = 4096
     dummy_eeg_input = torch.randn(batch_size, 63, 1, 200)
-    dummy_fmri_input = torch.randn(batch_size, fmri_seq_len, fmri_feature_dim)
+    dummy_fmri_input = torch.randn(batch_size, fmri_feature_dim)  # 2D, as from DataLoader
     dummy_label = torch.tensor([0, 1, 0, 1])  # Example class labels for prototypical distillation loss
 
     # Create dummy param object

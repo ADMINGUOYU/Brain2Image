@@ -25,10 +25,10 @@ MODEL_DIR=""  # Only set if loading full checkpoint
 MSE_SCALE=5.0
 INFONCE_SCALE=1.0
 PROTO_DISTILL_SCALE=5.0
-TEMPERATURE=0.07
+TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
-POOLING_TYPE="multitoken_vit"
-# --- attention and flatten pooling
+POOLING_TYPE="attention"  # Options: "attention", "multitoken_vit", "flatten"
+# ---  attention and flatten pooling
 EMBEDDING_DIM=4096
 MLP_LAYERS=2
 # --- attention pooling
