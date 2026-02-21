@@ -12,23 +12,25 @@ OPTIMIZER="AdamW"
 CLIP_VALUE=1.0
 DROPOUT=0.25
 
-# Path Configuration
-DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01"
+# Backbone — change this to switch between models
+EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
+
+# Path Configuration (auto-selected by backbone)
+if [ "$EEG_ENCODER_TYPE" = "CBraMod" ]; then
+    DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01"
+    FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"
+elif [ "$EEG_ENCODER_TYPE" = "ATMS" ]; then
+    DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_250Hz"
+    FOUNDATION_DIR="datasets/processed/atms/sub-01.pth"
+else
+    echo "ERROR: Unknown EEG_ENCODER_TYPE=$EEG_ENCODER_TYPE"
+    exit 1
+fi
 
 # Model Configuration
 FROZEN="false"  # Set to "true" to freeze EEG encoder
 USE_PRETRAINED_WEIGHTS="true"
-FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"  # CBraMod weights; use atms/sub-01.pth for ATMS backbone
 MODEL_DIR=""  # Only set if loading full checkpoint
-
-# Architecture Parameters
-MSE_SCALE=5.0
-INFONCE_SCALE=1.0
-PROTO_DISTILL_SCALE=5.0
-TEMPERATURE=0.1
-NORMALIZE_FMRI="true"
-# Backbone
-EEG_ENCODER_TYPE="CBraMod"  # Options: "CBraMod", "ATMS"
 
 # Please configure one of the following
 # ---------------------------------------------------- #
