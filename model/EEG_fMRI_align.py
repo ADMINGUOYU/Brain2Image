@@ -194,10 +194,10 @@ class EEG_fMRI_Align(nn.Module):
 
         return total_loss, mse_loss, infonce_loss, proto_loss
     
-    def get_metrics_for_alignment(self, 
-                                aligned_embeds: torch.Tensor, 
-                                target_embeds: torch.Tensor) -> typing.Tuple[float, float, float]:
-        
+    def get_metrics_for_alignment(self,
+                                aligned_embeds: torch.Tensor,
+                                target_embeds: torch.Tensor) -> typing.Tuple[float, float, float, float]:
+
         """
         Compute evaluation metrics for EEG-fMRI alignment.
         Args:
@@ -206,7 +206,8 @@ class EEG_fMRI_Align(nn.Module):
         Returns:
             mse: Mean Squared Error between aligned EEG embeddings and target fMRI embeddings
             cos_sim: Average cosine similarity between aligned EEG embeddings and target fMRI embeddings
-            retrieval_acc: Top-1 retrieval accuracy based on cosine similaritys
+            retrieval_acc: Top-1 retrieval accuracy based on cosine similarity
+            retrieval_acc_top10: Top-10 retrieval accuracy based on cosine similarity
         """
         # Normalize target embeddings to unit sphere if configured
         if self.normalize_fmri:
@@ -218,14 +219,19 @@ class EEG_fMRI_Align(nn.Module):
         # Cosine similarity (aligned_embeds already unit-norm)
         cos_sim = F.cosine_similarity(aligned_embeds, target_embeds, dim=1).mean().item()
 
-        # Top-1 retrieval accuracy
+        # Top-1 and Top-10 retrieval accuracy
         pred_norm = F.normalize(aligned_embeds, dim=1)
         target_norm = F.normalize(target_embeds, dim=1)
         sim_matrix = torch.matmul(pred_norm, target_norm.T)
+        labels = torch.arange(len(aligned_embeds), device=aligned_embeds.device)
         top_1 = torch.argmax(sim_matrix, dim=1)
-        retrieval_acc = (top_1 == torch.arange(len(aligned_embeds), device=aligned_embeds.device)).float().mean().item()
+        retrieval_acc = (top_1 == labels).float().mean().item()
 
-        return mse, cos_sim, retrieval_acc
+        k = min(10, len(aligned_embeds))
+        top_k_indices = torch.topk(sim_matrix, k=k, dim=1).indices
+        retrieval_acc_top10 = (top_k_indices == labels.unsqueeze(1)).any(dim=1).float().mean().item()
+
+        return mse, cos_sim, retrieval_acc, retrieval_acc_top10
 
 # Test code
 if __name__ == "__main__":

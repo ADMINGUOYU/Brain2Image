@@ -208,10 +208,10 @@ def train(model: EEG_fMRI_Align,
                 # concatenate outputs and compute metrics
                 outputs = torch.cat(outputs, dim=0)
                 fMRI_targets = torch.cat(fMRI_targets, dim=0)
-                mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
+                mse, cos_sim, retrieval_acc, retrieval_acc_top10 = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
             # verbose validation metrics
             avg_val_loss = val_loss / len(data_loader['val'])
-            print(f"Epoch [{epoch+1}/{num_epochs}] - Val Loss: {avg_val_loss:.4f} (MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc: {retrieval_acc:.4f})")
+            print(f"Epoch [{epoch+1}/{num_epochs}] - Val Loss: {avg_val_loss:.4f} (MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc (Top1): {retrieval_acc:.4f}, Top10: {retrieval_acc_top10:.4f})")
     
             # Checkpointing
             if avg_val_loss < best_val_loss:
@@ -241,7 +241,8 @@ def train(model: EEG_fMRI_Align,
                 logger.add_scalar('Proto_Distill_Loss/Val', avg_proto_val_loss, epoch)
                 logger.add_scalar('Metrics/MSE', mse, epoch)
                 logger.add_scalar('Metrics/Cosine_Similarity', cos_sim, epoch)
-                logger.add_scalar('Metrics/Retrieval_Accuracy', retrieval_acc, epoch)
+                logger.add_scalar('Metrics/Retrieval_Accuracy_Top1', retrieval_acc, epoch)
+                logger.add_scalar('Metrics/Retrieval_Accuracy_Top10', retrieval_acc_top10, epoch)
                 # Log optimizer learning rate
                 param_groups = optim_state['param_groups']
                 for i, group in enumerate(param_groups):
@@ -280,14 +281,15 @@ def test(model: EEG_fMRI_Align,
         # concatenate outputs and compute metrics
         outputs = torch.cat(outputs, dim=0)
         fMRI_targets = torch.cat(fMRI_targets, dim=0)
-        mse, cos_sim, retrieval_acc = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
-        print(f"Test Metrics - MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc: {retrieval_acc:.4f}")
+        mse, cos_sim, retrieval_acc, retrieval_acc_top10 = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
+        print(f"Test Metrics - MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc (Top1): {retrieval_acc:.4f}, Top10: {retrieval_acc_top10:.4f}")
 
         # Tensor board logging
         if logger is not None:
             logger.add_scalar('Test/MSE', mse)
             logger.add_scalar('Test/Cosine_Similarity', cos_sim)
-            logger.add_scalar('Test/Retrieval_Accuracy', retrieval_acc)
+            logger.add_scalar('Test/Retrieval_Accuracy_Top1', retrieval_acc)
+            logger.add_scalar('Test/Retrieval_Accuracy_Top10', retrieval_acc_top10)
 
 # Main function
 if __name__ == "__main__":
