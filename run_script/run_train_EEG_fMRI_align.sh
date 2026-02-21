@@ -22,9 +22,9 @@ FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"  # Required i
 MODEL_DIR=""  # Only set if loading full checkpoint
 
 # Architecture Parameters
-MSE_SCALE=1.0
+MSE_SCALE=5.0
 INFONCE_SCALE=1.0
-PROTO_DISTILL_SCALE=1.0
+PROTO_DISTILL_SCALE=5.0
 TEMPERATURE=0.07
 NORMALIZE_FMRI="true"
 POOLING_TYPE="multitoken_vit"

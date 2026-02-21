@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# import the transformer module
-from .layers import MultiHeadAttention
 
 # import the eeg encoder
 from .encoders.cbramod_eeg_encoder import CBraMod_EEG_Encoder as EEG_Encoder
@@ -55,10 +53,11 @@ class EEG_fMRI_Align(nn.Module):
         self.eeg_encoder = EEG_Encoder(param['EEG_Encoder'])
 
         # Transformer module for alignment
-        self.transformer = MultiHeadAttention(
-            d_model = self.eeg_encoder.output_dim, 
+        self.transformer = nn.MultiheadAttention(
+            embed_dim = self.eeg_encoder.output_dim,
             num_heads = param['Attention_Merge'].get('alignment_attention_heads', 8),
-            dropout = param['Attention_Merge'].get('alignment_attention_dropout', 0.1)
+            dropout = param['Attention_Merge'].get('alignment_attention_dropout', 0.1),
+            batch_first = True
         )
 
         # Loss function parameters
