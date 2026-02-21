@@ -399,8 +399,6 @@ class ATMS_EEG_Encoder(nn.Module):
                 param['dropout']           : float, default 0.25
                 param['factor']            : int,   default 1     (attention factor)
 
-                param['out_mlp_dim']       : int,   default None   (dimension of the output MLP head, if used)
-
                 param['cuda']                   : int,  ckpt loading mapping device
                 param['use_pretrained_weights'] : bool, whether to load pretrained weights
                 param['foundation_dir']         : str,  directory to load pretrained weights
