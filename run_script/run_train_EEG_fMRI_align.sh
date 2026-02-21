@@ -18,7 +18,7 @@ DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-0
 # Model Configuration
 FROZEN="false"  # Set to "true" to freeze EEG encoder
 USE_PRETRAINED_WEIGHTS="true"
-FOUNDATION_DIR="datasets/processed/cbramod/pretrained_weights.pth"  # Required if USE_PRETRAINED_WEIGHTS=true
+FOUNDATION_DIR="datasets/processed/atms/sub-01.pth"  # Required if USE_PRETRAINED_WEIGHTS=true
 MODEL_DIR=""  # Only set if loading full checkpoint
 
 # Architecture Parameters
@@ -37,7 +37,7 @@ ALIGNMENT_ATTENTION_DROPOUT=0.25
 # ---------------------------------------------------- #
 # ATMS-specific parameters (if EEG_ENCODER_TYPE=ATMS)
 ATMS_EMB_SIZE=40
-ATMS_PROJ_DIM=4096
+OUT_MLP_DIM=4096
 ATMS_DROP_PROJ=0.5
 ATMS_D_MODEL=250
 ATMS_N_HEADS=4
@@ -92,7 +92,7 @@ CMD="python -m train.train_EEG_fMRI_align \
     --num_transformer_layers $NUM_TRANSFORMER_LAYERS \
     --num_attention_heads $NUM_ATTENTION_HEADS \
     --atms_emb_size $ATMS_EMB_SIZE \
-    --atms_proj_dim $ATMS_PROJ_DIM \
+    --out_mlp_dim $OUT_MLP_DIM \
     --atms_drop_proj $ATMS_DROP_PROJ \
     --atms_d_model $ATMS_D_MODEL \
     --atms_n_heads $ATMS_N_HEADS \

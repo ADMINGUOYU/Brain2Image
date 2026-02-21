@@ -48,8 +48,6 @@ def get_args() -> argparse.Namespace:
 
     # Encoder backbone settings
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'], help='EEG encoder backbone (default: CBraMod)')
-
-    # CBraMod backbone settings
     parser.add_argument('--frozen', type=lambda x: x.lower() == 'true',
                         default=False, help='frozen')  # whether to freeze the EEG encoder during training
     parser.add_argument('--use_pretrained_weights', type=lambda x: x.lower() == 'true',
@@ -60,7 +58,7 @@ def get_args() -> argparse.Namespace:
     
     # ATMS backbone settings
     parser.add_argument('--atms_emb_size', type=int, default=40, help='ATMS embedding size (default: 40)')
-    parser.add_argument('--atms_proj_dim', type=int, default=3200, help='ATMS projection dimension (default: 3200)')
+    parser.add_argument('--out_mlp_dim', type=int, default=3200, help='ATMS projection dimension (default: 3200)')
     parser.add_argument('--atms_drop_proj', type=float, default=0.5, help='ATMS projection head dropout (default: 0.5)')
     parser.add_argument('--atms_d_model', type=int, default=250, help='ATMS iTransformer d_model (default: 250)')
     parser.add_argument('--atms_n_heads', type=int, default=4, help='ATMS iTransformer number of heads (default: 4)')
@@ -79,22 +77,25 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--num_workers', type=int, default=16, help='num_workers')
     
     # EEG-fMRI alignment (model) specific parameters
-    parser.add_argument("--embedding_dim", type=int, default=4096, help="Output embedding dimension")
-    parser.add_argument("--mlp_layers", type=int, default=2, help="Number of MLP layers")
     parser.add_argument("--mse_scale", type=float, default=1.0, help="MSE loss scale")
     parser.add_argument("--infonce_scale", type=float, default=1.0, help="InfoNCE loss scale")
     parser.add_argument("--proto_distill_scale", type=float, default=1.0, help="Prototypical distillation loss scale")
     parser.add_argument("--temperature", type=float, default=0.07, help="InfoNCE temperature")
     parser.add_argument("--normalize_fmri", type=lambda x: x.lower() == 'true', default=True, help="Normalize fMRI to unit norm")
+    parser.add_argument("--alignment_attention_heads", type=int, default=4, help="Number of attention heads for alignment attention")
+    parser.add_argument('--alignment_attention_dropout', type=float, default=0.25, help='Dropout for alignment attention')
+    
+    # WARNING: These parameters are baked in CBraMod module
+    # TODO: refactor and pull these out of CBraMod backbone
     parser.add_argument("--pooling_type", type=str, default='flatten', choices=['flatten', 'attention', 'multitoken_vit'],
                         help="Pooling type: flatten, attention, or multitoken_vit")
+    parser.add_argument("--embedding_dim", type=int, default=4096, help="Output embedding dimension")
+    parser.add_argument("--mlp_layers", type=int, default=2, help="Number of MLP layers")
     parser.add_argument("--attention_heads", type=int, default=8, help="Number of attention heads for attention pooling")
     parser.add_argument("--num_tokens", type=int, default=4, help="Number of learnable tokens for multitoken_vit pooling")
     parser.add_argument("--num_transformer_layers", type=int, default=4, help="Number of transformer layers for multitoken_vit pooling")
     parser.add_argument("--num_attention_heads", type=int, default=4, help="Number of attention heads for multitoken_vit transformer")
-    parser.add_argument("--alignment_attention_heads", type=int, default=4, help="Number of attention heads for alignment attention")
-    parser.add_argument('--alignment_attention_dropout', type=float, default=0.25, help='Dropout for alignment attention')
-    
+   
     return parser.parse_args()
 
 # training loop
@@ -363,10 +364,13 @@ if __name__ == "__main__":
     elif args.backbone == 'ATMS':
         encoder_config = {
             'encoder_type': 'ATMS',
+            'cuda' : args.cuda,
+            'use_pretrained_weights': args.use_pretrained_weights,
+            'foundation_dir': args.foundation_dir,
             "num_channels": 63,
-            "seq_len":      200,
+            "seq_len":      250,
             "emb_size":     args.atms_emb_size,
-            "proj_dim":     args.atms_proj_dim,
+            "proj_dim":     1024,
             "drop_proj":    args.atms_drop_proj,
             "d_model":      args.atms_d_model,
             "n_heads":      args.atms_n_heads,
@@ -374,6 +378,7 @@ if __name__ == "__main__":
             "d_ff":         args.atms_d_ff,
             "dropout":      args.atms_dropout,
             "factor":       args.atms_factor,
+            "out_mlp_dim":  args.out_mlp_dim
         }
     else:
         raise ValueError(f"Unsupported backbone type: {args.backbone}")
