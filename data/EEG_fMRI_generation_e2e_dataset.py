@@ -2,6 +2,7 @@
 # Extends the alignment dataset to also provide:
 # - CLIP image embeddings (NO need ???)
 # - raw images (for blurry reconstruction target).
+# - Pre-computed generation targets: ViT-bigG CLIP tokens, VAE latents, ConvNeXt features
 #
 # NOTE: please run preprocess/process_EEG_fMRI_align.py
 #       first to create the aligned EEG-fMRI LMDB datasets.
@@ -18,6 +19,9 @@
 #   'nsd_clip_target':       (batch_size, clip_embed_dim)
 #   'things_image':          (batch_size, 3, 224, 224)
 #   'nsd_image':             (batch_size, 3, 224, 224)
+#   'clip_target_bigG':      (batch_size, 256, 1664)  — pre-computed ViT-bigG/14 patch tokens
+#   'vae_latents':           (batch_size, 4, 28, 28)   — pre-computed SD VAE latents
+#   'cnx_features':          (batch_size, 49, 512)     — pre-computed ConvNeXt features
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -166,6 +170,11 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         things_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
         nsd_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
 
+        # Pre-computed generation targets (zero fallback if unavailable)
+        clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
+        vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
+        cnx_features = np.zeros((49, 512), dtype = np.float32)
+
         if self.has_images and things_img_idx in self.things_img_idx_to_row:
             # Get the row for the current image index
             things_row = self.things_img_idx_to_row.get(things_img_idx, None)
@@ -197,14 +206,24 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                 img = np.transpose(img, (2, 0, 1))  # (3, H, W)
                 nsd_image_data = img
 
+            # Load pre-computed generation targets from NSD images DataFrame
+            if nsd_row is not None:
+                if "clip_bigG_embeddings" in nsd_row and nsd_row["clip_bigG_embeddings"] is not None:
+                    clip_target_bigG = nsd_row["clip_bigG_embeddings"].astype(np.float32)
+                if "vae_latents" in nsd_row and nsd_row["vae_latents"] is not None:
+                    vae_latents = nsd_row["vae_latents"].astype(np.float32)
+                if "cnx_features" in nsd_row and nsd_row["cnx_features"] is not None:
+                    cnx_features = nsd_row["cnx_features"].astype(np.float32)
+
         return EEG, fMRI, label, \
                things_img_idx, nsd_img_idx, \
                things_clip_embed, nsd_clip_embed, \
-               things_image_data, nsd_image_data
+               things_image_data, nsd_image_data, \
+               clip_target_bigG, vae_latents, cnx_features
 
-    def collate(self, batch: typing.List[typing.Tuple[np.ndarray, np.ndarray, int, int, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]) \
-        -> typing.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        
+    def collate(self, batch: typing.List) \
+        -> typing.Tuple[torch.Tensor, ...]:
+
         EEG = np.array([x[0] for x in batch]).squeeze()
         fMRI = np.array([x[1] for x in batch]).squeeze()
         label = np.array([x[2] for x in batch])
@@ -214,6 +233,9 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         nsd_clip_embed = np.array([x[6] for x in batch])
         things_image_data = np.array([x[7] for x in batch])
         nsd_image_data = np.array([x[8] for x in batch])
+        clip_target_bigG = np.array([x[9] for x in batch])
+        vae_latents = np.array([x[10] for x in batch])
+        cnx_features = np.array([x[11] for x in batch])
 
         # Reshape EEG to (B, C, 1, T)
         EEG = EEG.reshape(EEG.shape[0], EEG.shape[1], 1, EEG.shape[2])
@@ -228,6 +250,9 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             torch.from_numpy(nsd_clip_embed).float(),
             torch.from_numpy(things_image_data).float(),
             torch.from_numpy(nsd_image_data).float(),
+            torch.from_numpy(clip_target_bigG).float(),
+            torch.from_numpy(vae_latents).float(),
+            torch.from_numpy(cnx_features).float(),
         )
 
 
@@ -328,7 +353,10 @@ if __name__ == "__main__":
         things_clip_batch,
         nsd_clip_batch,
         things_image_batch,
-        nsd_image_batch
+        nsd_image_batch,
+        clip_target_bigG_batch,
+        vae_latents_batch,
+        cnx_features_batch
     ) in data_loader["train"]:
         print(f"EEG batch shape: {EEG_batch.shape}")
         print(f"fMRI batch shape: {fMRI_batch.shape}")
@@ -339,4 +367,7 @@ if __name__ == "__main__":
         print(f"NSD CLIP batch shape: {nsd_clip_batch.shape}")
         print(f"THINGS image batch shape: {things_image_batch.shape}")
         print(f"NSD image batch shape: {nsd_image_batch.shape}")
+        print(f"CLIP target bigG batch shape: {clip_target_bigG_batch.shape}")
+        print(f"VAE latents batch shape: {vae_latents_batch.shape}")
+        print(f"ConvNeXt features batch shape: {cnx_features_batch.shape}")
         break
