@@ -11,9 +11,12 @@ Brain2Image aligns EEG (THINGS-EEG dataset) and fMRI (NSD dataset) brain signals
 ```bash
 conda env create -f environment.yml
 conda activate BRAIN2IMAGE
+pip install setuptools==81.0.0  # required for TensorBoard compatibility
 ```
 
-Key dependencies: Python 3.12, PyTorch 2.6.0 (CUDA 12.6), mne, h5py, lmdb, einops.
+If pandas import fails with libc++ errors, run `bash libc++FIX.sh` (fixes LD_LIBRARY_PATH).
+
+Key dependencies: Python 3.12, PyTorch 2.6.0 (CUDA 12.6), mne, h5py, lmdb, einops, dalle2-pytorch, diffusers.
 
 ## Data Pipeline (run in order)
 
@@ -33,11 +36,21 @@ Outputs land in `datasets/processed/`. The LMDB dataset is split 80/10/10 (train
 
 ## Training
 
+Two training tasks are available:
+
+**EEG-fMRI Alignment** (primary task):
 ```bash
 bash run_script/run_train_EEG_fMRI_align.sh
 ```
 
-Or directly:
+**EEG Classification** (auxiliary task — 5-class K-means cluster prediction):
+```bash
+bash run_script/run_train_EEG_classify.sh
+```
+
+Both scripts support switching between CBraMod and ATMS backbones via the `EEG_ENCODER_TYPE` variable. Dataset paths are auto-selected by backbone (CBraMod uses 200Hz data, ATMS uses 250Hz data).
+
+Direct invocation example:
 ```bash
 python -m train.train_EEG_fMRI_align \
     --datasets_dir datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01 \
@@ -58,8 +71,10 @@ NSD-fMRI → MindEye2 ───────┘   (fMRI projected to 4096-dim via
 ```
 
 **Model pipeline** (`model/EEG_fMRI_align.py`):
-1. **CBraMod backbone** (`model/CBraMod/cbramod.py`) — pretrained EEG foundation model; 12-layer criss-cross transformer with spectral patch embedding. Input: `(B, 63, 1, 200)` → Output: `(B, 63, 1, 200)`.
-2. **Pooling head** (`model/encoders/cbramod_eeg_encoder.py`) — three strategies: `flatten` (MLP), `attention` (dynamic pooling + MLP), `multitoken_vit` (learnable tokens + transformer). Output: `(B, 4096)`.
+1. **EEG backbone** — two options:
+   - **CBraMod** (`model/CBraMod/cbramod.py`) — pretrained EEG foundation model; 12-layer criss-cross transformer with spectral patch embedding. Input: `(B, 63, 1, 200)` → Output: `(B, 63, 1, 200)`.
+   - **ATMS** (`model/encoders/atms_eeg_encoder.py`) — attention-based time series model with projection. Input: `(B, 63, 250)` → Output: `(B, 4096)`.
+2. **Pooling head** (`model/encoders/cbramod_eeg_encoder.py`, CBraMod only) — three strategies: `flatten` (MLP), `attention` (dynamic pooling + MLP), `multitoken_vit` (learnable tokens + transformer). Output: `(B, 4096)`.
 3. **Alignment module** — multi-head attention where fMRI is the query and EEG is key/value, producing a `(B, 1, 4096)` aligned embedding.
 
 **Loss functions** (all three combined with configurable scales):
@@ -74,10 +89,23 @@ NSD-fMRI → MindEye2 ───────┘   (fMRI projected to 4096-dim via
 | File | Purpose |
 |------|---------|
 | `model/EEG_fMRI_align.py` | Top-level alignment model + loss computation |
-| `model/encoders/cbramod_eeg_encoder.py` | EEG encoder with pooling strategies |
+| `model/EEG_classify.py` | Classification model (5-class K-means clusters) |
+| `model/encoders/cbramod_eeg_encoder.py` | CBraMod EEG encoder with pooling strategies |
+| `model/encoders/atms_eeg_encoder.py` | ATMS EEG encoder with attention + projection |
 | `model/CBraMod/cbramod.py` | CBraMod backbone (pretrained EEG foundation model) |
+| `model/layers/` | Reusable layers: attention, attention_pooling, multi_token_ViT, fully_connected |
 | `data/EEG_fMRI_align_dataset.py` | LMDB dataset; EEG normalized by /100, optional fMRI unit norm |
-| `train/train_EEG_fMRI_align.py` | Training loop, validation metrics (MSE, cosine sim, retrieval accuracy) |
+| `data/EEG_fMRI_generation_e2e_dataset.py` | Extended dataset with CLIP embeddings and raw images for generation |
+| `train/train_EEG_fMRI_align.py` | Alignment training loop, validation metrics (MSE, cosine sim, retrieval accuracy) |
+| `train/train_EEG_classify.py` | Classification training loop |
 | `preprocess/process_EEG_fMRI_align.py` | Builds the LMDB dataset from repacked data |
+| `preprocess/process_things_nsd_images_clustering.py` | Image matching via CLIP + K-means clustering |
 | `datasets/things-eeg_repack.py` | THINGS-EEG raw → DataFrame + CLIP embeddings |
 | `datasets/nsd-fmri_repack.py` | NSD-fMRI raw → DataFrame + CLIP embeddings |
+
+## Notes
+
+- All training modules are invoked as `python -m train.<module>` (package-style imports).
+- No formal test suite exists; modules have `if __name__ == "__main__"` blocks for ad-hoc testing.
+- No linting or formatting configuration is set up.
+- `MindEyeV2/` is a separate git repo (cloned from MedARC-AI/MindEyeV2) used for fMRI ridge regression and the generation pipeline. It is gitignored from the main repo.

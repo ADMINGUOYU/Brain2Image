@@ -13,7 +13,7 @@ CLIP_VALUE=1.0
 DROPOUT=0.25
 
 # Backbone — change this to switch between models
-EEG_ENCODER_TYPE="CBraMod"  # Options: "CBraMod", "ATMS"
+EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
 
 # Path Configuration (auto-selected by backbone)
 if [ "$EEG_ENCODER_TYPE" = "CBraMod" ]; then
@@ -33,9 +33,9 @@ USE_PRETRAINED_WEIGHTS="true"
 MODEL_DIR=""  # Only set if loading full checkpoint
 
 # Loss / Training Parameters
-MSE_SCALE=5.0
-INFONCE_SCALE=1.0
-PROTO_DISTILL_SCALE=5.0
+MSE_SCALE=1.0
+INFONCE_SCALE=0.2
+PROTO_DISTILL_SCALE=0.0
 TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
 
