@@ -9,6 +9,7 @@ LR=3e-4
 WEIGHT_DECAY=5e-2
 CLIP_VALUE=1.0
 USE_AMP="true"
+NUM_WORKERS=16
 
 # Backbone — change this to switch between models
 EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
@@ -99,6 +100,7 @@ CMD="python -m train.train_EEG_fMRI_e2e \
     --use_pretrained_weights $USE_PRETRAINED_WEIGHTS \
     --datasets_dir $DATASETS_DIR \
     --images_df_dir $IMAGES_DF_DIR \
+    --num_workers $NUM_WORKERS \
     --embedding_dim $EMBEDDING_DIM \
     --mlp_layers $MLP_LAYERS \
     --pooling_type $POOLING_TYPE \

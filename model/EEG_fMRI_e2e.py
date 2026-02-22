@@ -206,8 +206,14 @@ class EEG_fMRI_E2E(nn.Module):
         if self.blurry_recon and gen_outputs['blurry_latents'] is not None:
             blur_loss = F.l1_loss(gen_outputs['blurry_latents'], vae_latents)
             if cnx_features is not None:
+                # Debug print shapes
+                # print(f"[DEBUG] Blurry features shape: {gen_outputs['blurry_features'].shape}, "
+                #       f"ConvNeXt features shape: {cnx_features.shape}")
                 blur_loss = blur_loss + 0.1 * soft_cont_loss(
-                    gen_outputs['blurry_features'], cnx_features, cnx_features, temp=0.2
+                    gen_outputs['blurry_features'].reshape(gen_outputs['blurry_features'].size(0), -1),
+                    cnx_features.reshape(cnx_features.size(0), -1),
+                    cnx_features.reshape(cnx_features.size(0), -1), 
+                    temp=0.2
                 )
 
         # Total weighted loss
