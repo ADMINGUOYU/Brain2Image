@@ -1,4 +1,6 @@
 # Requirement file for conda environment
+# NOTE: please downgrade setuptools to 81.0.0 to launch tensorboard
+#       pip install setuptools==81.0.0
 name: BRAIN2IMAGE
 channels:
     - conda-forge
@@ -36,6 +38,11 @@ dependencies:
         - torchinfo
         - umap-learn
         - tensorboard
+
+        # MindEyeV2 generation pipeline dependencies
+        # NOTE: dalle2-pytorch requires pandas 2.3.3
+        - dalle2-pytorch
+        - diffusers
 
 # Create
 # conda env create -f environment.yml
