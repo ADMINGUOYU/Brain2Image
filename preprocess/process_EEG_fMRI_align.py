@@ -82,6 +82,11 @@ split_seed = 42
 # Device for processing
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+# Make a copy of full ckpt? (downloaded from MindEYE2)
+# You might need this if you wish to load the full ckpt in end-to-end model
+# saved under: <processed_di>/mindeye2/sub-<subject_number>_last_full.pth
+preserve_full_ckpt = True
+
 # ---------------- End of configuration ---------------- #
 
 # First we have to download the ckpt from MindEYE2
@@ -96,6 +101,11 @@ def download_ckpt(subject_number: int):
         os.makedirs(os.path.dirname(ckpt_path), exist_ok = True)
         # use wget to download the file
         os.system(f"wget -O {ckpt_path} {ckpt_url}")
+        # If specified
+        if preserve_full_ckpt:
+            # we make a copy of the full ckpt
+            full_ckpt_path = processed_dir + f"/mindeye2/sub-{subject_number:02d}_last_full.pth"
+            os.system(f"cp {ckpt_path} {full_ckpt_path}")
         # Opens the file and only keep ridge keys to save space
         checkpoint = torch.load(ckpt_path, map_location = 'cpu')
         ridge_state_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if 'ridge' in k}
