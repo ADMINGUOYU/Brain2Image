@@ -4,11 +4,17 @@
 # transformer package is required to run this script.
 # run "pip install transformers" to install the package.
 
+"""
+Please use 'python -m datasets.nsd-fmri_repack' to run this script.
+"""
+
 # We'll save the processed data in pandas.DataFrame:
 # (fmri / image_index / subject / split / sample_id / tar_path).
 # We'll also index every unique images within the used coco dataset
 # and save it in a separate pandas.DataFrame:
-# (image_index / image_data / image_embedding / subject / split)
+# (image_index / image_data / image_embedding /
+#  clip_bigG_embeddings / vae_latents / cnx_features /
+#  subject / split)
 # WARNING: A special set of 1,000 images was viewed by all participants.
 #          other images are all unique. if shared 'subject' would be 'shared'.
 
@@ -22,9 +28,9 @@
 # import os
 import os
 # set transformers cache directory
-os.environ['TRANSFORMERS_CACHE'] = '/mnt/afs/250010218/hf_cache'
-os.environ['HF_HOME'] = '/mnt/afs/250010218/hf_cache'
-os.environ['HF_HUB_CACHE'] = '/mnt/afs/250010218/hf_cache'
+os.environ['TRANSFORMERS_CACHE'] = 'datasets/transformers_cache'
+os.environ['HF_HOME'] = 'datasets/transformers_cache'
+os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
 
 # import necessary libraries
 import torch
@@ -34,6 +40,9 @@ import h5py
 import tarfile
 import io
 from transformers import CLIPModel, CLIPProcessor
+from diffusers import AutoencoderKL
+from model.autoencoder.convnext import ConvnextXL
+import open_clip
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
@@ -42,10 +51,15 @@ from tqdm import tqdm
 data_path = 'datasets/NSD/webdataset_avg_new'
 coco_image_indices_path = 'datasets/NSD/COCO_73k_subj_indices.hdf5'
 processed_data_dir = 'datasets/processed'
+vae_encode_ckpt_path = 'datasets/NSD/sd_image_var_autoenc_mindeye2.pth'
+convnext_xl_ckpt_path = 'datasets/NSD/convnext_xlarge_alpha0.75_fullckpt.pth'
 os.makedirs(processed_data_dir, exist_ok = True)
 
 # we specify the subjects we want to process
 subject_wanted = ['sub-01'] # 8 in total
+
+# CUDA device configuration
+CUDA = 0
 
 # ---------------- End of configuration ---------------- #
 
@@ -86,10 +100,33 @@ def process_nsd_fmri_image_all_subjects():
     # NOTE: we process all subjects first and then select the wanted ones
     # NOTE: we will also cache the full-subject processed data.
     # NOTE: each subject might have multiple tar files
+    device = f'cuda:{CUDA}' if torch.cuda.is_available() else 'cpu'
     # initialize CLIP model and processor
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
+    # initialize OpenCLIP ViT-bigG-14 for clip_bigG_embeddings
+    clip_bigG_model, _, clip_bigG_preprocess = open_clip.create_model_and_transforms(
+        'ViT-bigG-14', pretrained = 'laion2b_s39b_b160k'
+    )
+    clip_bigG_model = clip_bigG_model.to(device).eval()
+    clip_bigG_model.visual.output_tokens = True
+    # initialize Stable Diffusion VAE for vae_latents
+    vae_model = AutoencoderKL(
+        down_block_types = ['DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'],
+        up_block_types = ['UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'],
+        block_out_channels = [128, 256, 512, 512],
+        layers_per_block = 2,
+        sample_size = 256,
+    )
+    vae_model.load_state_dict(torch.load(vae_encode_ckpt_path, map_location = device))
+    vae_model.requires_grad_(False)
+    vae_model.eval()
+    vae_model.to(device)
+    # initialize ConvNeXt-XL for cnx_features
+    cnx_model = ConvnextXL(path = convnext_xl_ckpt_path)
+    cnx_model.requires_grad_(False)
+    cnx_model.eval()
+    cnx_model.to(device)
     # through every split (we collect all subject)
     all_subjects_data = []
     all_images_data = { }
@@ -156,20 +193,50 @@ def process_nsd_fmri_image_all_subjects():
                     # read the image from the .jpg file
                     image_file = [m for m in sample_members if m.name.endswith('.jpg')][0]
                     image_data = tar.extractfile(image_file).read()
-                    image = np.array(Image.open(io.BytesIO(image_data)).convert('RGB'))
+                    image_pil = Image.open(io.BytesIO(image_data)).convert('RGB')
+                    image_numpy = np.array(image_pil)
+                    image_tensor_float = (torch.tensor(np.array(image_pil).transpose(2,0,1)).float() / 255.0).unsqueeze(0).to(device) # shape (1, 3, H, W), range [0, 1]
                     # process the image using CLIPProcessor and CLIPModel to get its embedding
-                    inputs = processor(images = image, return_tensors = 'pt').to(device)
+                    # also extract clip_bigG_embeddings, vae_latents, cnx_features
                     with torch.no_grad():
+                        # CLIP-ViT-L/14 embedding
+                        inputs = processor(images = image_numpy, return_tensors = 'pt').to(device)
                         image_embedding = model.get_image_features(**inputs).pooler_output.cpu().squeeze().numpy()
                         # image_embedding = model.get_image_features(**inputs).cpu().squeeze().numpy()
+                        
+                        # OpenCLIP ViT-bigG-14 token embeddings (256 tokens, 1664 dim)
+                        clip_bigG_input = clip_bigG_preprocess(image_pil).unsqueeze(0).to(device)
+                        _ , clip_bigG_tokens = clip_bigG_model.visual.forward(clip_bigG_input)
+                        clip_bigG_emb = clip_bigG_tokens.cpu().squeeze(0).numpy()
+                        
+                        # Stable Diffusion VAE latent encoding
+                        vae_latent = vae_model.encode(2 * image_tensor_float - 1).latent_dist.mode().cpu().squeeze(0).numpy() * 0.18215
+                        
+                        # ConvNeXt-XL features (use normalized image)
+                        mean = torch.tensor([0.485, 0.456, 0.406]).to(device).reshape(3, 1, 1)
+                        std = torch.tensor([0.228, 0.224, 0.225]).to(device).reshape(3, 1, 1)
+                        cnx_input = (image_tensor_float - mean) / std
+                        cnx_feat = cnx_model.forward(cnx_input)[1].cpu().squeeze(0).numpy()
+
                     # assert the shape of the image embedding is (768,)
                     assert image_embedding.shape == (768,), f"Unexpected image embedding shape: {image_embedding.shape}"
+                    # assert the shape of clip_bigG_embeddings is (256, 1664)
+                    assert clip_bigG_emb.shape == (256, 1664), f"Unexpected clip_bigG shape: {clip_bigG_emb.shape}"
+                    # assert the shape of vae_latents is (4, 28, 28)
+                    assert vae_latent.shape == (4, 28, 28), f"Unexpected vae_latent shape: {vae_latent.shape}"
+                    # assert the shape of cnx_features is (49, 512)
+                    assert cnx_feat.shape == (49, 512), f"Unexpected cnx_features shape: {cnx_feat.shape}"
                     # store the image data in all_images_data
-                    # (image_index / image_data / image_embedding / subject / split)
+                    # (image_index / image_data / image_embedding /
+                    #  clip_bigG_embeddings / vae_latents / cnx_features /
+                    #  subject / split)
                     all_images_data[coco_index] = {
                         'image_index': coco_index,
-                        'image_data': image,
+                        'image_data': image_numpy,
                         'image_embedding': image_embedding,
+                        'clip_bigG_embeddings': clip_bigG_emb,
+                        'vae_latents': vae_latent,
+                        'cnx_features': cnx_feat,
                         'subject': subject if not is_shared_image else 'shared',
                         'split': split,
                     }
@@ -183,6 +250,17 @@ def process_nsd_fmri_image_all_subjects():
     images_df.to_pickle(os.path.join(processed_data_dir, 'nsd_images_df.pkl'))
 
 if __name__ == "__main__":
+
+    # Check if we have the ckpts for image processing
+    if not os.path.exists(vae_encode_ckpt_path):
+        # Download using wget
+        print(f"Downloading Stable Diffusion VAE checkpoint for image processing...")
+        os.system(f"wget -O {vae_encode_ckpt_path} https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/sd_image_var_autoenc.pth?download=true")
+    if not os.path.exists(convnext_xl_ckpt_path):
+        # Download using wget
+        print(f"Downloading ConvNeXt-XL checkpoint for image processing...")
+        os.system(f"wget -O {convnext_xl_ckpt_path} https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/convnext_xlarge_alpha0.75_fullckpt.pth?download=true")
+
     # check if the processed data already exists
     subjects_df_path = os.path.join(processed_data_dir, 'nsd_fmri_data_df.pkl')
     images_df_path = os.path.join(processed_data_dir, 'nsd_images_df.pkl')

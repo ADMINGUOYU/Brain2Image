@@ -43,6 +43,7 @@ dependencies:
         # NOTE: dalle2-pytorch requires pandas 2.3.3
         - dalle2-pytorch
         - diffusers
+        - open_clip_torch
 
 # Create
 # conda env create -f environment.yml

@@ -16,13 +16,14 @@
 
 # import os
 import os
+
 # # set proxy
 # os.environ['NO_PROXY'] = 'huggingface.co'
 
 # set transformers cache directory
-os.environ['TRANSFORMERS_CACHE'] = '/mnt/afs/250010218/hf_cache'
-os.environ['HF_HOME'] = '/mnt/afs/250010218/hf_cache'
-os.environ['HF_HUB_CACHE'] = '/mnt/afs/250010218/hf_cache'
+os.environ['TRANSFORMERS_CACHE'] = 'datasets/transformers_cache'
+os.environ['HF_HOME'] = 'datasets/transformers_cache'
+os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
 
 # import necessary libraries
 import torch
