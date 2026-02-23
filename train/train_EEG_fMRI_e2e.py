@@ -40,7 +40,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'])
     parser.add_argument('--freeze_encoder', type=lambda x: x.lower() == 'true', default=False)
     parser.add_argument('--use_pretrained_weights', type=lambda x: x.lower() == 'true', default=True)
-    parser.add_argument('--foundation_dir', type=str, default=None)
+    parser.add_argument('--foundation_dir', type=str, default=None, help='Directory containing pretrained weights for the encoder backbone (CBraMod or ATMS)')
 
     # ATMS backbone settings
     parser.add_argument('--atms_emb_size', type=int, default=40)
@@ -76,6 +76,9 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--blur_scale", type=float, default=0.5)
     parser.add_argument("--mixup_pct", type=float, default=0.33)
     parser.add_argument("--blurry_recon", type=lambda x: x.lower() == 'true', default=True)
+
+    # MindEye2 checkpoint for generation modules
+    parser.add_argument('--mindeye2_ckpt_path', type=str, default=None, help='Path to MindEYE2 checkpoint for loading generation module weights')
 
     # Checkpoints and paths
     parser.add_argument('--model_dir', type=str, default=None, help='Full E2E checkpoint')
@@ -345,6 +348,7 @@ if __name__ == "__main__":
             'clip_loss_scale': args.clip_loss_scale,
             'blur_scale': args.blur_scale,
             'align_scale': args.align_scale,
+            'mindeye2_ckpt_path' : args.mindeye2_ckpt_path,
         },
     }
 

@@ -28,6 +28,8 @@ fi
 
 IMAGES_DF_DIR="datasets/processed"
 
+MindEYE2_CKPT_PATH="datasets/processed/mindeye2/sub-01_last_full.pth"
+
 # Model Configuration
 FREEZE_ENCODER="false"
 USE_PRETRAINED_WEIGHTS="true"
@@ -132,6 +134,10 @@ CMD="python -m train.train_EEG_fMRI_e2e \
 # Add conditional arguments
 if [ -n "$FOUNDATION_DIR" ]; then
     CMD="$CMD --foundation_dir $FOUNDATION_DIR"
+fi
+
+if [ -n "$MindEYE2_CKPT_PATH" ]; then
+    CMD="$CMD --mindeye2_ckpt_path $MindEYE2_CKPT_PATH"
 fi
 
 if [ -n "$MODEL_DIR" ]; then

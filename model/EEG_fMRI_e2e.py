@@ -107,6 +107,15 @@ class EEG_fMRI_E2E(nn.Module):
         self.blurry_recon = blurry_recon
         self.clip_size = clip_size
 
+        # -- Generation (MindEYE2) ckpt loading --
+        mindeye2_ckpt_path = gen_cfg.get('mindeye2_ckpt_path', None)
+        if mindeye2_ckpt_path is not None:
+            print(f"Loading MindEYE2 weights from {mindeye2_ckpt_path} into BrainNetwork and BrainDiffusionPrior...")
+            # we use 'cpu' for now
+            # when we move the model to GPU later, the weights will be on the same device as the rest of the model
+            self.brain_network.load_mindeye2_weights(mindeye2_ckpt_path, 'cpu')
+            self.diffusion_prior.load_mindeye2_weights(mindeye2_ckpt_path, 'cpu')
+
     def forward_encoder(self, eeg_input: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through EEG encoder only (before MixCo).

@@ -189,6 +189,59 @@ class BrainNetwork(nn.Module):
         
         return backbone, c, b
 
+    def load_mindeye2_weights(self, weight_path: str, map_location = None) -> None:
+        """
+        Load the MindEYE2 checkpoint for the BrainNetwork.
+
+        NOTE: this function is meant to be compatible with weights from:
+              MedARC-AI/MindEyeV2/blob/main/src/Train.ipynb 
+
+        Args:
+            weight_path: path to the MindEYE2 checkpoint
+            map_location: device to map the weights to
+        """
+        
+        # Warn user about this function
+        print(f"\033[91mWARNING: You are using load_mindeye2_weights() in BrainNetwork which is designed to load pretrained weights from MedARC-AI/MindEyeV2. Make sure your weight file is compatible with this format.\033[0m")
+
+        # Set default map_location if not provided
+        if map_location is None:
+            map_location = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load the state dict
+        state_dict = torch.load(weight_path, map_location = map_location)
+
+        # We load all parameters started with "backbone."
+        # The rest of name string is unchanged
+        # in state_dict['model_state_dict']
+        model_state_dict = self.state_dict()
+        pretrained_state_dict = state_dict['model_state_dict']
+        items_needed = len(model_state_dict)
+        items_loaded = 0
+        keyword = "backbone."
+        # Iterate all keys in pretrained state_dict
+        for name, param in pretrained_state_dict.items():
+            if name.startswith(keyword):
+                # Remove <keyword> prefix
+                new_name = name[len(keyword):]
+                # Look for the new name in the current model's state dict
+                if new_name in model_state_dict:
+                    # Assert shape compatibility
+                    if model_state_dict[new_name].shape != param.shape:
+                        print(f"\033[91mShape mismatch for {name} -> {new_name}: {param.shape} vs {model_state_dict[new_name].shape}\033[0m")
+                        continue
+                    # Load the parameter into the current model's state dict
+                    model_state_dict[new_name].copy_(param)
+                    items_loaded += 1
+                else:
+                    print(f"\033[91mKey {new_name} not found in current model state dict.\033[0m")
+
+        # Print the summary of loading
+        if items_needed != items_loaded:
+            print(f"\033[93mLoaded {items_loaded}/{items_needed} parameters for MindEYE2 -> BrainNetwork. Please check the above messages for details.\033[0m")
+        else:
+            print(f"\033[92mSuccessfully loaded all {items_loaded} parameters for MindEYE2 -> BrainNetwork.\033[0m")
+
 # Testing code
 if __name__ == "__main__":
     # Create a random input tensor of shape (batch_size, seq_len, in_dim)
@@ -200,6 +253,12 @@ if __name__ == "__main__":
     # Create an instance of the BrainNetwork
     model = BrainNetwork()
 
+    # MindEYE2 checkpoint path
+    checkpoint_path = "datasets/processed/mindeye2/sub-01_last_full.pth"
+
+    # Load the MindEYE2 weights into the model
+    model.load_mindeye2_weights(checkpoint_path, 'cpu')
+    
     # Forward pass
     backbone, c, b = model.forward(x)
 
