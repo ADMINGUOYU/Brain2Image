@@ -12,7 +12,9 @@
       "Bash(python3 -c \"\nimport numpy as np\nthings = np.load\\('/mnt/afs/250010218/Brain2Image/datasets/NSD/subj01_things.npy', allow_pickle=True\\)\nprint\\('Shape:', things.shape\\)\n# Count label distribution\nfrom collections import Counter\nflat_labels = []\nfor item in things:\n    if isinstance\\(item, \\(list, np.ndarray\\)\\):\n        for l in item:\n            flat_labels.append\\(str\\(l\\)\\)\n    else:\n        flat_labels.append\\(str\\(item\\)\\)\nc = Counter\\(flat_labels\\)\nprint\\(f'Total unique labels: {len\\(c\\)}'\\)\nprint\\('Top 20 labels:'\\)\nfor label, count in c.most_common\\(20\\):\n    print\\(f'  {label}: {count}'\\)\n\")",
       "mcp__ide__getDiagnostics",
       "Bash(wc:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(python3:*)",
+      "Bash(find:*)"
     ]
   }
 }
