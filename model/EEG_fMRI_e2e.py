@@ -195,8 +195,9 @@ class EEG_fMRI_E2E(nn.Module):
 
         # 3. CLIP contrastive loss
         clip_voxels = gen_outputs['clip_voxels']  # (B, 256, 1664)
-        clip_voxels_flat = clip_voxels.flatten(1)  # (B, 256*1664)
-        clip_target_flat = clip_target.flatten(1)   # (B, 256*1664)
+        # !!! FIXED: REMEMBER TO NORMALIZE BEFORE CONTRASTIVE LOSS !!!
+        clip_voxels_flat = F.normalize(clip_voxels.flatten(1), dim = -1)  # (B, 256*1664)
+        clip_target_flat = F.normalize(clip_target.flatten(1), dim = -1)   # (B, 256*1664)
 
         if perm is not None:
             # MixCo active — use mixco_nce
@@ -218,10 +219,11 @@ class EEG_fMRI_E2E(nn.Module):
                 # Debug print shapes
                 # print(f"[DEBUG] Blurry features shape: {gen_outputs['blurry_features'].shape}, "
                 #       f"ConvNeXt features shape: {cnx_features.shape}")
+                # !!! FIXED: NORMALIZE BEFORE SOFT CONT LOSS !!!
                 blur_loss = blur_loss + 0.1 * soft_cont_loss(
-                    gen_outputs['blurry_features'].reshape(gen_outputs['blurry_features'].size(0), -1),
-                    cnx_features.reshape(cnx_features.size(0), -1),
-                    cnx_features.reshape(cnx_features.size(0), -1), 
+                    F.normalize(gen_outputs['blurry_features'].reshape(gen_outputs['blurry_features'].size(0), -1), dim = -1),
+                    F.normalize(cnx_features.reshape(cnx_features.size(0), -1), dim = -1),
+                    F.normalize(cnx_features.reshape(cnx_features.size(0), -1), dim = -1), 
                     temp=0.2
                 )
 
