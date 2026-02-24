@@ -195,65 +195,66 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         things_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
         nsd_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
 
-        if self.load_images and self.has_images and \
-            things_img_idx in self.things_img_idx_to_row and \
-                nsd_img_idx in self.nsd_img_idx_to_row:
+        clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
+        vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
+        cnx_features = np.zeros((49, 512), dtype = np.float32)
+
+        if self.has_images:
             
-            # Get the row for the current image index
-            things_row = self.things_img_idx_to_row.get(things_img_idx, None)
-            nsd_row = self.nsd_img_idx_to_row.get(nsd_img_idx, None)
+            # If we wish to load images (image + 768 embedding)
+            if self.load_images:
 
-            # Extract CLIP embedding and image data if available
-            if "image_embedding" in things_row and things_row["image_embedding"] is not None:
-                things_clip_embed = things_row["image_embedding"].astype(np.float32)
-            if "image_embedding" in nsd_row and nsd_row["image_embedding"] is not None:
-                nsd_clip_embed = nsd_row["image_embedding"].astype(np.float32)
+                # Get the row for the current image index
+                things_row = self.things_img_idx_to_row.get(things_img_idx, None)
+                nsd_row = self.nsd_img_idx_to_row.get(nsd_img_idx, None)
 
-            # Extract and process raw image data if available
-            if self.load_images and "image_data" in things_row and things_row["image_data"] is not None:
-                img = things_row["image_data"]  # (H, W, 3) uint8
-                # Check datatype and shape before processing
-                assert img.dtype == np.uint8, f"Unexpected image dtype: {img.dtype} for THINGS image index {things_img_idx}"
-                assert img.shape == (self.image_size, self.image_size, 3), f"Unexpected image shape: {img.shape} for THINGS image index {things_img_idx}"
-                # Normalize to [0, 1] and transpose to (3, H, W)
-                img = img.astype(np.float32) / 255.0
-                img = np.transpose(img, (2, 0, 1))  # (3, H, W)
-                things_image_data = img
-            if self.load_images and "image_data" in nsd_row and nsd_row["image_data"] is not None:
-                img = nsd_row["image_data"]  # (H, W, 3) uint8
-                # Check datatype and shape before processing
-                assert img.dtype == np.uint8, f"Unexpected image dtype: {img.dtype} for NSD image index {nsd_img_idx}"
-                assert img.shape == (self.image_size, self.image_size, 3), f"Unexpected image shape: {img.shape} for NSD image index {nsd_img_idx}"
-                # Normalize to [0, 1] and transpose to (3, H, W)
-                img = img.astype(np.float32) / 255.0
-                img = np.transpose(img, (2, 0, 1))  # (3, H, W)
-                nsd_image_data = img
+                # Extract CLIP embedding and image data if available
+                if "image_embedding" in things_row and things_row["image_embedding"] is not None:
+                    things_clip_embed = things_row["image_embedding"].astype(np.float32)
+                if "image_embedding" in nsd_row and nsd_row["image_embedding"] is not None:
+                    nsd_clip_embed = nsd_row["image_embedding"].astype(np.float32)
+
+                # Extract and process raw image data if available
+                if "image_data" in things_row and things_row["image_data"] is not None:
+                    img = things_row["image_data"]  # (H, W, 3) uint8
+                    # Check datatype and shape before processing
+                    assert img.dtype == np.uint8, f"Unexpected image dtype: {img.dtype} for THINGS image index {things_img_idx}"
+                    assert img.shape == (self.image_size, self.image_size, 3), f"Unexpected image shape: {img.shape} for THINGS image index {things_img_idx}"
+                    # Normalize to [0, 1] and transpose to (3, H, W)
+                    img = img.astype(np.float32) / 255.0
+                    img = np.transpose(img, (2, 0, 1))  # (3, H, W)
+                    things_image_data = img
+                if "image_data" in nsd_row and nsd_row["image_data"] is not None:
+                    img = nsd_row["image_data"]  # (H, W, 3) uint8
+                    # Check datatype and shape before processing
+                    assert img.dtype == np.uint8, f"Unexpected image dtype: {img.dtype} for NSD image index {nsd_img_idx}"
+                    assert img.shape == (self.image_size, self.image_size, 3), f"Unexpected image shape: {img.shape} for NSD image index {nsd_img_idx}"
+                    # Normalize to [0, 1] and transpose to (3, H, W)
+                    img = img.astype(np.float32) / 255.0
+                    img = np.transpose(img, (2, 0, 1))  # (3, H, W)
+                    nsd_image_data = img
 
             # Load pre-computed generation targets based on emb_source setting
             # Pre-computed generation targets (zero fallback if unavailable)
-            clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
-            vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
-            cnx_features = np.zeros((49, 512), dtype = np.float32)
             # if image data available
-            if self.has_images:
-                # select corresponding embedding index
-                if self.emb_source == "nsd":
-                    emb_idx = nsd_img_idx
-                else:  # "things"
-                    emb_idx = things_img_idx
-                # load from lookup dict built from embedding dataframe
-                row = self.emb_idx_to_row.get(emb_idx, None)
-                # assert row not None and has needed fields
-                assert row is not None, f"Missing embedding row for index {emb_idx}"
-                assert "clip_bigG_embeddings" in row and "vae_latents" in row and "cnx_features" in row, \
-                    f"Missing required fields in embedding row for index {emb_idx}"
-                # Load embeddings
-                if "clip_bigG_embeddings" in row and row["clip_bigG_embeddings"] is not None:
-                    clip_target_bigG = row["clip_bigG_embeddings"].astype(np.float32)
-                if "vae_latents" in row and row["vae_latents"] is not None:
-                    vae_latents = row["vae_latents"].astype(np.float32)
-                if "cnx_features" in row and row["cnx_features"] is not None:
-                    cnx_features = row["cnx_features"].astype(np.float32)
+            # select corresponding embedding index
+            if self.emb_source == "nsd":
+                emb_idx = nsd_img_idx
+            else:  # "things"
+                emb_idx = things_img_idx
+            # load from lookup dict built from embedding dataframe
+            row = self.emb_idx_to_row.get(emb_idx, None)
+            # assert row not None and has needed fields
+            assert row is not None, f"Missing embedding row for index {emb_idx}"
+            assert "clip_bigG_embeddings" in row and "vae_latents" in row and "cnx_features" in row, \
+                f"Missing required fields in embedding row for index {emb_idx}"
+            # Load embeddings
+            if "clip_bigG_embeddings" in row and row["clip_bigG_embeddings"] is not None:
+                clip_target_bigG = row["clip_bigG_embeddings"].astype(np.float32)
+            if "vae_latents" in row and row["vae_latents"] is not None:
+                vae_latents = row["vae_latents"].astype(np.float32)
+            if "cnx_features" in row and row["cnx_features"] is not None:
+                cnx_features = row["cnx_features"].astype(np.float32)
 
         # return everything
         return EEG, fMRI, label, \
@@ -477,7 +478,7 @@ if __name__ == "__main__":
     batch_size = 16
     
     data_loader = get_generation_data_loader(
-        datasets_dir, images_df_dir, batch_size, emb_source = 'nsd'
+        datasets_dir, images_df_dir, batch_size, emb_source = 'things'
     )
 
     for (
