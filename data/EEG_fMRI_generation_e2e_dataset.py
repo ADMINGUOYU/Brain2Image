@@ -349,6 +349,9 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                 f"\033[92mLoaded {emb_source} embeddings DataFrame from {emb_df_path} ({len(emb_df)} entries).\033[0m"
             )
 
+            # set flag
+            has_images = True
+
         else:
             if not os.path.exists(things_images_df_path):
                 print(
