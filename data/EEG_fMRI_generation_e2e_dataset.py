@@ -54,7 +54,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         normalize_fmri: bool = True,
         load_images: bool = False,
         image_size: int = 224,
-        emb_source: str = "things", # "nsd" or "things" - which CLIP embeddings to use as generation targets (if available
+        emb_source: str = "things", # "nsd" or "things" - which CLIP embeddings to use as generation targets
         _shared_data: typing.Optional[dict] = None,
     ):
         super().__init__()

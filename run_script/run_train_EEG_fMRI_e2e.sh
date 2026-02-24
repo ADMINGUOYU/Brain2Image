@@ -50,6 +50,7 @@ CLIP_LOSS_SCALE=1.0
 BLUR_SCALE=0.5
 MIXUP_PCT=0.33
 BLURRY_RECON="true"
+EMB_SOURCE="things"  # Options: "nsd", "things" — which image source for generation targets
 
 # Please configure one of the following
 # ---------------------------------------------------- #
@@ -129,6 +130,7 @@ CMD="python -m train.train_EEG_fMRI_e2e \
     --blur_scale $BLUR_SCALE \
     --mixup_pct $MIXUP_PCT \
     --blurry_recon $BLURRY_RECON \
+    --emb_source $EMB_SOURCE \
     --script_path $0"
 
 # Add conditional arguments

@@ -87,6 +87,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--datasets_dir', type=str, default=None)
     parser.add_argument('--images_df_dir', type=str, default='datasets/processed')
     parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--emb_source', type=str, default='things', choices=['nsd', 'things'],
+                        help='Which image source to use for generation targets (default: things)')
 
     return parser.parse_args()
 
@@ -290,6 +292,7 @@ if __name__ == "__main__":
         normalize_fmri=args.normalize_fmri,
         load_images=False,
         num_workers=args.num_workers,
+        emb_source=args.emb_source,
     )
 
     # Build model config
