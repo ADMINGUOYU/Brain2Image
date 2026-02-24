@@ -10,7 +10,9 @@
       "Bash(python3 -c \"\nimport numpy as np\nidx = np.load\\('/mnt/afs/250010218/Brain2Image/datasets/NSD/sub01_coco73k_idx.npy', allow_pickle=True\\)\nprint\\('sub01_coco73k_idx shape:', idx.shape, 'dtype:', idx.dtype\\)\nprint\\('Sample:', idx[:10]\\)\nprint\\('Unique:', len\\(np.unique\\(idx\\)\\)\\)\n\")",
       "Bash(python3 -c \"\nimport torch\n# Check THINGS-EEG preprocessed train data structure\ndata = torch.load\\('/mnt/afs/250010218/Brain2Image/datasets/THINGS-EEG/Preprocessed_data_250Hz_whiten/sub-01/train.pt', map_location='cpu'\\)\nif isinstance\\(data, dict\\):\n    print\\('Keys:', list\\(data.keys\\(\\)\\)\\)\n    for k, v in data.items\\(\\):\n        if hasattr\\(v, 'shape'\\):\n            print\\(f'  {k}: shape={v.shape}, dtype={v.dtype}'\\)\n        elif isinstance\\(v, list\\):\n            print\\(f'  {k}: list len={len\\(v\\)}, sample={v[:3]}'\\)\n        else:\n            print\\(f'  {k}: type={type\\(v\\).__name__}'\\)\nelif isinstance\\(data, \\(list, tuple\\)\\):\n    print\\('Type:', type\\(data\\).__name__, 'len:', len\\(data\\)\\)\nelse:\n    print\\('Type:', type\\(data\\).__name__\\)\n\")",
       "Bash(python3 -c \"\nimport numpy as np\nthings = np.load\\('/mnt/afs/250010218/Brain2Image/datasets/NSD/subj01_things.npy', allow_pickle=True\\)\nprint\\('Shape:', things.shape\\)\n# Count label distribution\nfrom collections import Counter\nflat_labels = []\nfor item in things:\n    if isinstance\\(item, \\(list, np.ndarray\\)\\):\n        for l in item:\n            flat_labels.append\\(str\\(l\\)\\)\n    else:\n        flat_labels.append\\(str\\(item\\)\\)\nc = Counter\\(flat_labels\\)\nprint\\(f'Total unique labels: {len\\(c\\)}'\\)\nprint\\('Top 20 labels:'\\)\nfor label, count in c.most_common\\(20\\):\n    print\\(f'  {label}: {count}'\\)\n\")",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(wc:*)",
+      "Bash(git:*)"
     ]
   }
 }
