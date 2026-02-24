@@ -161,6 +161,7 @@ class EEG_fMRI_E2E(nn.Module):
         clip_target: torch.Tensor,
         vae_latents: torch.Tensor,
         cnx_features: torch.Tensor,
+        cnx_blurry_features: torch.Tensor,
         epoch: int,
         num_epochs: int,
         perm: torch.Tensor = None,
@@ -177,6 +178,7 @@ class EEG_fMRI_E2E(nn.Module):
             clip_target:  (B, 256, 1664) — pre-computed ViT-bigG patch tokens
             vae_latents:  (B, 4, 28, 28) — pre-computed SD VAE latents
             cnx_features: (B, 49, 512) — pre-computed ConvNeXt features
+            cnx_blurry_features: (B, 49, 512) — pre-computed ConvNeXt features for blurry recon
             epoch, num_epochs: for temperature annealing
             perm, betas, select: MixCo parameters (None if no MixCo)
         Returns:
@@ -223,7 +225,7 @@ class EEG_fMRI_E2E(nn.Module):
                 blur_loss = blur_loss + 0.1 * soft_cont_loss(
                     F.normalize(gen_outputs['blurry_features'].reshape(gen_outputs['blurry_features'].size(0), -1), dim = -1),
                     F.normalize(cnx_features.reshape(cnx_features.size(0), -1), dim = -1),
-                    F.normalize(cnx_features.reshape(cnx_features.size(0), -1), dim = -1), 
+                    F.normalize(cnx_blurry_features.reshape(cnx_blurry_features.size(0), -1), dim = -1), 
                     temp=0.2
                 )
 

@@ -2,7 +2,7 @@
 # Reads an already-packed images DataFrame pkl 
 # (e.g. nsd_images_df.pkl or things_images_df.pkl)
 # and produces a separate *_emb.pkl with columns:
-#   [image_index, clip_bigG_embeddings, vae_latents, cnx_features]
+#   [image_index, clip_bigG_embeddings, vae_latents, cnx_features, cnx_blurry_features]
 #
 # Usage:
 #   python -m datasets.emb_generation --input datasets/processed/nsd_images_df.pkl
@@ -44,6 +44,8 @@ import pandas as pd
 import open_clip
 from diffusers import AutoencoderKL
 from model.autoencoder.convnext import ConvnextXL
+import kornia
+from kornia.augmentation import AugmentationSequential
 from PIL import Image
 from tqdm import tqdm
 import typing
@@ -62,7 +64,7 @@ def download_checkpoints():
         print(f"Downloading ConvNeXt-XL checkpoint...")
         os.system(f"wget -O {convnext_xl_ckpt_path} https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/convnext_xlarge_alpha0.75_fullckpt.pth?download=true")
 
-def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Callable, torch.nn.Module, torch.nn.Module]:
+def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Callable, torch.nn.Module, torch.nn.Module, kornia.augmentation.AugmentationSequential]:
     
     """
     Initialize OpenCLIP ViT-bigG-14, SD VAE, and ConvNeXt-XL.
@@ -95,7 +97,16 @@ def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Ca
     cnx_model.eval()
     cnx_model.to(device)
 
-    return clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model
+    # Blur augmentation
+    blur_augs = AugmentationSequential(
+        kornia.augmentation.ColorJitter(brightness = 0.4, contrast = 0.4, saturation = 0.2, hue = 0.1, p = 0.8),
+        kornia.augmentation.RandomGrayscale(p = 0.1),
+        kornia.augmentation.RandomSolarize(p = 0.1),
+        kornia.augmentation.RandomResizedCrop((224,224), scale = (.9,.9), ratio = (1,1), p = 1.0),
+        data_keys = ["input"],
+    ).to(device)
+
+    return clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model, blur_augs
 
 def generate_embeddings(input_path: str, output_path: str) -> None:
 
@@ -112,7 +123,7 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
     print(f"Loaded {len(images_df)} images.")
 
     print("Initializing models...")
-    clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model = init_models(device)
+    clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model, blur_augs = init_models(device)
 
     # Pre-compute normalization constants for ConvNeXt
     # NOTE: This is provided by MindEYE2
@@ -150,10 +161,15 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
             cnx_input = (image_tensor_float - mean) / std
             cnx_feat = cnx_model.forward(cnx_input)[1].cpu().squeeze(0).numpy()
 
+            # Blurry augmentation
+            cnx_blurry_input = (blur_augs.forward(image_tensor_float) - mean) / std
+            cnx_blurry_feat = cnx_model.forward(cnx_blurry_input)[1].cpu().squeeze(0).numpy()
+
         # Shape assertions
         assert clip_bigG_emb.shape == (256, 1664), f"Unexpected clip_bigG shape: {clip_bigG_emb.shape}"
         assert vae_latent.shape == (4, 28, 28), f"Unexpected vae_latent shape: {vae_latent.shape}"
         assert cnx_feat.shape == (49, 512), f"Unexpected cnx_features shape: {cnx_feat.shape}"
+        assert cnx_blurry_feat.shape == (49, 512), f"Unexpected cnx_blurry_features shape: {cnx_blurry_feat.shape}"
 
         # Append record for this image
         emb_records.append({
@@ -161,6 +177,7 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
             'clip_bigG_embeddings': clip_bigG_emb,
             'vae_latents': vae_latent,
             'cnx_features': cnx_feat,
+            'cnx_blurry_features': cnx_blurry_feat,
         })
 
     # Save embeddings DataFrame

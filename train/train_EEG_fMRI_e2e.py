@@ -117,7 +117,7 @@ def train(model: EEG_fMRI_E2E,
 
         for batch in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}"):
             (EEG, fMRI, label, _, _, _, _, _, _,
-             clip_target, vae_latents, cnx_features) = batch
+             clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
 
             EEG = EEG.to(device)
             fMRI = fMRI.to(device)
@@ -125,6 +125,7 @@ def train(model: EEG_fMRI_E2E,
             clip_target = clip_target.to(device)
             vae_latents = vae_latents.to(device)
             cnx_features = cnx_features.to(device)
+            cnx_blurry_features = cnx_blurry_features.to(device)
 
             # Stage 1: EEG encoder (BEFORE MixCo — raw EEG is never augmented)
             with torch.amp.autocast('cuda', enabled=use_amp):
@@ -152,7 +153,7 @@ def train(model: EEG_fMRI_E2E,
                 gen_outputs = model.forward_generation(eeg_embeds_mixed)
                 losses = model.calc_e2e_loss(
                     eeg_embeds_orig, fMRI, label, gen_outputs,
-                    clip_target_mixed, vae_latents, cnx_features,
+                    clip_target_mixed, vae_latents, cnx_features, cnx_blurry_features,
                     epoch, num_epochs, perm, betas, select,
                 )
 
@@ -181,7 +182,7 @@ def train(model: EEG_fMRI_E2E,
         with torch.no_grad():
             for batch in data_loader['val']:
                 (EEG, fMRI, label, _, _, _, _, _, _,
-                 clip_target, vae_latents, cnx_features) = batch
+                 clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
 
                 EEG = EEG.to(device)
                 fMRI = fMRI.to(device)
@@ -189,13 +190,14 @@ def train(model: EEG_fMRI_E2E,
                 clip_target = clip_target.to(device)
                 vae_latents = vae_latents.to(device)
                 cnx_features = cnx_features.to(device)
+                cnx_blurry_features = cnx_blurry_features.to(device)
 
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     eeg_embeds = model.forward_encoder(EEG)
                     gen_outputs = model.forward_generation(eeg_embeds)
                     losses = model.calc_e2e_loss(
                         eeg_embeds, fMRI, label, gen_outputs,
-                        clip_target, vae_latents, cnx_features,
+                        clip_target, vae_latents, cnx_features, cnx_blurry_features,
                         epoch, num_epochs,
                     )
 
@@ -210,7 +212,7 @@ def train(model: EEG_fMRI_E2E,
         with torch.no_grad():
             for batch in tqdm(data_loader['val'], desc=f"Val Metrics {epoch+1}"):
                 (EEG, fMRI, label, _, _, _, _, _, _,
-                 clip_target, vae_latents, cnx_features) = batch
+                 clip_target, vae_latents, cnx_features, _ ) = batch
                 EEG, fMRI = EEG.to(device), fMRI.to(device)
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     eeg_embeds = model.forward_encoder(EEG)

@@ -22,6 +22,7 @@
 #   'clip_target_bigG':      (batch_size, 256, 1664)   — pre-computed ViT-bigG/14 patch tokens
 #   'vae_latents':           (batch_size, 4, 28, 28)   — pre-computed SD VAE latents
 #   'cnx_features':          (batch_size, 49, 512)     — pre-computed ConvNeXt features
+#   'cnx_blurry_features':       (batch_size, 3, 224, 224) — pre-computed blurry augmentation (for blurry reconstruction target)
 
 
 # --------------- Start of configuration --------------- #
@@ -198,6 +199,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
         vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
         cnx_features = np.zeros((49, 512), dtype = np.float32)
+        cnx_blurry_features = np.zeros((49, 512), dtype = np.float32)
 
         if self.has_images:
             
@@ -246,7 +248,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             row = self.emb_idx_to_row.get(emb_idx, None)
             # assert row not None and has needed fields
             assert row is not None, f"Missing embedding row for index {emb_idx}"
-            assert "clip_bigG_embeddings" in row and "vae_latents" in row and "cnx_features" in row, \
+            assert "clip_bigG_embeddings" in row and "vae_latents" in row and "cnx_features" in row and "cnx_blurry_features" in row, \
                 f"Missing required fields in embedding row for index {emb_idx}"
             # Load embeddings
             if "clip_bigG_embeddings" in row and row["clip_bigG_embeddings"] is not None:
@@ -255,13 +257,15 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                 vae_latents = row["vae_latents"].astype(np.float32)
             if "cnx_features" in row and row["cnx_features"] is not None:
                 cnx_features = row["cnx_features"].astype(np.float32)
+            if "cnx_blurry_features" in row and row["cnx_blurry_features"] is not None:
+                cnx_blurry_features = row["cnx_blurry_features"].astype(np.float32)
 
         # return everything
         return EEG, fMRI, label, \
                things_img_idx, nsd_img_idx, \
                things_clip_embed, nsd_clip_embed, \
                things_image_data, nsd_image_data, \
-               clip_target_bigG, vae_latents, cnx_features
+               clip_target_bigG, vae_latents, cnx_features, cnx_blurry_features
 
     def collate(self, batch: typing.List) \
         -> typing.Tuple[torch.Tensor, ...]:
@@ -278,7 +282,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         clip_target_bigG = np.array([x[9] for x in batch])
         vae_latents = np.array([x[10] for x in batch])
         cnx_features = np.array([x[11] for x in batch])
-
+        cnx_blurry_features = np.array([x[12] for x in batch])
         # Reshape EEG to (B, C, 1, T)
         EEG = EEG.reshape(EEG.shape[0], EEG.shape[1], 1, EEG.shape[2])
 
@@ -295,6 +299,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             torch.from_numpy(clip_target_bigG).float(),
             torch.from_numpy(vae_latents).float(),
             torch.from_numpy(cnx_features).float(),
+            torch.from_numpy(cnx_blurry_features).float(),
         )
 
     @staticmethod
@@ -493,7 +498,8 @@ if __name__ == "__main__":
         nsd_image_batch,
         clip_target_bigG_batch,
         vae_latents_batch,
-        cnx_features_batch
+        cnx_features_batch,
+        cnx_blurry_features_batch
     ) in data_loader["train"]:
         print(f"EEG batch shape: {EEG_batch.shape}")
         print(f"fMRI batch shape: {fMRI_batch.shape}")
@@ -507,4 +513,5 @@ if __name__ == "__main__":
         print(f"CLIP target bigG batch shape: {clip_target_bigG_batch.shape}")
         print(f"VAE latents batch shape: {vae_latents_batch.shape}")
         print(f"ConvNeXt features batch shape: {cnx_features_batch.shape}")
+        print(f"ConvNeXt blurry features batch shape: {cnx_blurry_features_batch.shape}")
         break
