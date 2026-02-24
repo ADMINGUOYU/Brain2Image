@@ -74,27 +74,30 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             f"emb_source must be 'nsd' or 'things', got '{emb_source}'"
         self.emb_source = emb_source
 
-        # Open lmdb database
-        self.db = lmdb.open(
-            data_dir,
-            readonly = True,
-            lock = False,
-            readahead = True,
-            meminit = False,
-        )
+        # Store path for lazy opening in worker processes (LMDB is NOT fork-safe)
+        self.data_dir = data_dir
+        self.db = None  # opened lazily in __getitem__
 
         # Some internal configs
         self.normalize_fmri = normalize_fmri
         self.load_images = load_images
         self.image_size = image_size
 
-        # Loads keys for the specified mode (train/val/test)
-        with self.db.begin(write=False) as txn:
+        # Temporarily open LMDB to load keys, then close immediately
+        _db = lmdb.open(
+            data_dir,
+            readonly = True,
+            lock = False,
+            readahead = False,
+            meminit = False,
+        )
+        with _db.begin(write=False) as txn:
             self.keys = [
                 key.decode()
                 for key, _ in txn.cursor()
                 if key.decode().startswith(mode + "_")
             ]
+        _db.close()
 
         # Use pre-built shared data if provided (avoids 3× pkl loading)
         if _shared_data is not None:
@@ -189,6 +192,16 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
 
         # Get the key for the current index
         key = self.keys[idx]
+
+        # Lazy-open LMDB in each worker process (LMDB mmap is NOT fork-safe)
+        if self.db is None:
+            self.db = lmdb.open(
+                self.data_dir,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
 
         # Load the data from LMDB using the key
         with self.db.begin(write = False) as txn:

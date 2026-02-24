@@ -29,17 +29,21 @@ class EEG_fMRI_Align_Dataset(Dataset):
         
         super(EEG_fMRI_Align_Dataset, self).__init__()
 
-        self.db = lmdb.open(data_dir, 
-                            readonly = True, 
-                            lock = False, 
-                            readahead = True, 
-                            meminit = False)
-        
+        # Store path for lazy opening in worker processes (LMDB is NOT fork-safe)
+        self.data_dir = data_dir
+        self.db = None  # opened lazily in __getitem__
+
         self.normalize_fmri = normalize_fmri
 
-        with self.db.begin(write = False) as txn:
-            # we only keep keys that belong to the current mode (train/val/test)
+        # Temporarily open LMDB to load keys, then close immediately
+        _db = lmdb.open(data_dir,
+                        readonly=True,
+                        lock=False,
+                        readahead=False,
+                        meminit=False)
+        with _db.begin(write=False) as txn:
             self.keys = [key.decode() for key, _ in txn.cursor() if key.decode().startswith(mode + '_')]
+        _db.close()
 
     def __len__(self) -> int:
         return len(self.keys)
@@ -48,6 +52,16 @@ class EEG_fMRI_Align_Dataset(Dataset):
 
         # Retrieve data from LMDB
         key = self.keys[idx]
+
+        # Lazy-open LMDB in each worker process (LMDB mmap is NOT fork-safe)
+        if self.db is None:
+            self.db = lmdb.open(
+                self.data_dir,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
 
         # Load data from LMDB
         with self.db.begin(write = False) as txn:
