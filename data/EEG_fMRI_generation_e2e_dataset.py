@@ -19,20 +19,10 @@
 #   'nsd_clip_target':       (batch_size, clip_embed_dim)
 #   'things_image':          (batch_size, 3, 224, 224)
 #   'nsd_image':             (batch_size, 3, 224, 224)
-#   'clip_target_bigG':      (batch_size, 256, 1664)  — pre-computed ViT-bigG/14 patch tokens
+#   'clip_target_bigG':      (batch_size, 256, 1664)   — pre-computed ViT-bigG/14 patch tokens
 #   'vae_latents':           (batch_size, 4, 28, 28)   — pre-computed SD VAE latents
 #   'cnx_features':          (batch_size, 49, 512)     — pre-computed ConvNeXt features
 
-import torch
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-import pandas as pd
-import lmdb
-import pickle
-import os
-from PIL import Image
-
-import typing
 
 # --------------- Start of configuration --------------- #
 
@@ -40,7 +30,20 @@ default_images_df_path = "datasets/processed"
 
 # ---------------- End of configuration ---------------- #
 
+
+# Import necessary libraries
+import os
+import torch
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
+import pandas as pd
+import lmdb
+import pickle
+
+import typing
+
 class EEG_fMRI_Generation_E2E_Dataset(Dataset):
+
     """
     Dataset EEG-fMRI generation end-to-end (E2E) pipeline.
     Loads EEG/fMRI from LMDB and image/CLIP data from repacked DataFrames.
@@ -54,7 +57,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         normalize_fmri: bool = True,
         load_images: bool = False,
         image_size: int = 224,
-        emb_source: str = "things", # "nsd" or "things" - which CLIP embeddings to use as generation targets
+        emb_source: str = "things",
         _shared_data: typing.Optional[dict] = None,
     ):
         super().__init__()
@@ -62,14 +65,22 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         """
         Args:
             data_dir: Path to the LMDB dataset directory containing aligned EEG-fMRI data.
-            images_df_dir: Directory containing the repacked DataFrames for THINGS and NSD images (with CLIP embeddings and raw images).
+            images_df_dir: Directory containing the repacked DataFrames for THINGS and NSD images
+                           (with CLIP embeddings and raw images).
+                           NOTE: extra 3 embeddings should be under the same directory with <image_df name>_emb.pkl
             mode: One of 'train', 'val', or 'test' to specify which split to load.
             normalize_fmri: Whether to L2-normalize the fMRI vectors. Default is True.
-            load_images: Whether to load CLIP embeddings and raw images (for blurry reconstruction target). Default is False.
-            emb_source: Source for generation targets — 'nsd' or 'things'. Default is 'nsd'.
-            _shared_data: Pre-built lookup dicts shared across splits. When provided, skips all pkl loading.
+            image_size: Size of raw images, deprecated used as assertion and dummy only. Default is 224.
+
+            load_images: Whether to load CLIP embeddings (786 dimension one) and raw images. Default is False.
+
+            emb_source: Source for generation targets — 'nsd' or 'things'. Default is 'things'.
+            _shared_data: Pre-built lookup dicts shared across splits. 
+                           NOTE:(This contains all needed image data and embeddings.)
         """
 
+        # We can only provide embeddings from NSD or THINGS
+        # NOTE: the is the image source used to generate bigG/vae/cnx target.
         assert emb_source in ("nsd", "things"), \
             f"emb_source must be 'nsd' or 'things', got '{emb_source}'"
         self.emb_source = emb_source
@@ -91,7 +102,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             readahead = False,
             meminit = False,
         )
-        with _db.begin(write=False) as txn:
+        with _db.begin(write = False) as txn:
             self.keys = [
                 key.decode()
                 for key, _ in txn.cursor()
@@ -100,88 +111,33 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         _db.close()
 
         # Use pre-built shared data if provided (avoids 3× pkl loading)
-        if _shared_data is not None:
-            self.things_img_idx_to_row = _shared_data["things_img_idx_to_row"]
-            self.nsd_img_idx_to_row = _shared_data["nsd_img_idx_to_row"]
-            self.nsd_emb_idx_to_row = _shared_data["nsd_emb_idx_to_row"]
-            self.things_emb_idx_to_row = _shared_data["things_emb_idx_to_row"]
-            self.has_images = _shared_data["has_images"]
-            return
-
-        # Standalone mode: load pkls directly
-        self._load_image_data(images_df_dir)
-
-    def _load_image_data(self, images_df_dir: str):
-        """Load image DataFrames and embeddings from pkl files (standalone mode)."""
-        things_images_df_path = os.path.join(images_df_dir, f"./things_images_df.pkl")
-        nsd_images_df_path = os.path.join(images_df_dir, f"./nsd_images_df.pkl")
-        if os.path.exists(things_images_df_path) and os.path.exists(nsd_images_df_path):
-            things_images_df = pd.read_pickle(things_images_df_path)
-            nsd_images_df = pd.read_pickle(nsd_images_df_path)
-            # Build index lookup for fast access
-            # THINGS images
-            self.things_img_idx_to_row = {}
-            for _, row in things_images_df.iterrows():
-                self.things_img_idx_to_row[int(row["image_index"])] = row
-            # NSD images
-            self.nsd_img_idx_to_row = {}
-            for _, row in nsd_images_df.iterrows():
-                self.nsd_img_idx_to_row[int(row["image_index"])] = row
-            # Verbose
+        # or, we load it now
+        # NOTE: the embeddings' dataframe is shared by train/val/test datasets.
+        if _shared_data is None:
+            # Warn user in this case
             print(
-                f"\033[92mSuccessfully loaded THINGS and NSD images DataFrames from {images_df_dir}. Image data and CLIP embeddings are available.\033[0m"
+                f"\033[93mWarning: No shared data provided to {mode} dataset. "
+                f"Loading image/embedding data from {images_df_dir} for this split. "
+                f"This may cause increased memory usage if multiple splits are loaded.\033[0m"
             )
-            # Flag to indicate images are available
-            self.has_images = True
-
-            # Load only the emb pkl matching emb_source (skip the other to save memory)
-            self.nsd_emb_idx_to_row = {}
-            self.things_emb_idx_to_row = {}
-
-            if self.emb_source == "nsd":
-                nsd_emb_path = os.path.join(images_df_dir, "nsd_images_emb.pkl")
-                if os.path.exists(nsd_emb_path):
-                    nsd_emb_df = pd.read_pickle(nsd_emb_path)
-                    for _, row in nsd_emb_df.iterrows():
-                        self.nsd_emb_idx_to_row[int(row["image_index"])] = row
-                    print(
-                        f"\033[92mLoaded NSD embeddings DataFrame from {nsd_emb_path} ({len(nsd_emb_df)} entries).\033[0m"
-                    )
-                else:
-                    print(
-                        f"\033[93mWarning: NSD embeddings DataFrame not found at {nsd_emb_path}. "
-                        f"Will fall back to nsd_images_df for generation targets (legacy mode).\033[0m"
-                    )
-            else:  # "things"
-                things_emb_path = os.path.join(images_df_dir, "things_images_emb.pkl")
-                if os.path.exists(things_emb_path):
-                    things_emb_df = pd.read_pickle(things_emb_path)
-                    for _, row in things_emb_df.iterrows():
-                        self.things_emb_idx_to_row[int(row["image_index"])] = row
-                    print(
-                        f"\033[92mLoaded THINGS embeddings DataFrame from {things_emb_path} ({len(things_emb_df)} entries).\033[0m"
-                    )
-                else:
-                    print(
-                        f"\033[93mWarning: THINGS embeddings DataFrame not found at {things_emb_path}. "
-                        f"Will fall back to things_images_df for generation targets (legacy mode).\033[0m"
-                    )
-        else:
-            # Check which one is not found and print a warning
-            if not os.path.exists(things_images_df_path):
-                print(
-                    f"\033[91mWarning: THINGS images DataFrame not found at {things_images_df_path}. "
-                    f"Image data and CLIP embeddings will be unavailable.\033[0m"
-                )
-            if not os.path.exists(nsd_images_df_path):
-                print(
-                    f"\033[91mWarning: NSD images DataFrame not found at {nsd_images_df_path}. "
-                    f"Image data and CLIP embeddings will be unavailable.\033[0m"
-                )
-            # Set flag to indicate images are not available
-            self.has_images = False
-            self.nsd_emb_idx_to_row = {}
-            self.things_emb_idx_to_row = {}
+            # Load data
+            _shared_data = EEG_fMRI_Generation_E2E_Dataset.load_shared_data(images_df_dir, emb_source)
+        # Set references
+        # Image indexes (containing image data)
+        self.things_img_idx_to_row = _shared_data["things_img_idx_to_row"]
+        self.nsd_img_idx_to_row = _shared_data["nsd_img_idx_to_row"]
+        # selected embedding indexes (containing embeddings)
+        self.emb_idx_to_row = _shared_data["emb_idx_to_row"]
+        # flag for whether image data is available
+        # NOTE: This means all data (including embeddings)
+        self.has_images = _shared_data["has_images"]
+        
+        # Warn user if image data not available (dummy would be used)
+        if not self.has_images:
+            print(
+                f"\033[93mWarning: Image data not available for {mode} dataset. "
+                f"ALL embeddings and raw images will be returned as zero vectors.\033[0m"
+            )
 
     def __len__(self) -> int:
         # Just the length of the keys for the current mode
@@ -197,10 +153,10 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         if self.db is None:
             self.db = lmdb.open(
                 self.data_dir,
-                readonly=True,
-                lock=False,
-                readahead=False,
-                meminit=False,
+                readonly = True,
+                lock = False,
+                readahead = False,
+                meminit = False,
             )
 
         # Load the data from LMDB using the key
@@ -239,12 +195,10 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         things_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
         nsd_image_data = np.zeros((3, self.image_size, self.image_size), dtype = np.float32)
 
-        # Pre-computed generation targets (zero fallback if unavailable)
-        clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
-        vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
-        cnx_features = np.zeros((49, 512), dtype = np.float32)
-
-        if self.has_images and things_img_idx in self.things_img_idx_to_row:
+        if self.load_images and self.has_images and \
+            things_img_idx in self.things_img_idx_to_row and \
+                nsd_img_idx in self.nsd_img_idx_to_row:
+            
             # Get the row for the current image index
             things_row = self.things_img_idx_to_row.get(things_img_idx, None)
             nsd_row = self.nsd_img_idx_to_row.get(nsd_img_idx, None)
@@ -276,32 +230,32 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                 nsd_image_data = img
 
             # Load pre-computed generation targets based on emb_source setting
-            if self.emb_source == "nsd":
-                emb_idx = nsd_img_idx
-                emb_lookup = self.nsd_emb_idx_to_row
-                legacy_row = nsd_row
-            else:  # "things"
-                emb_idx = things_img_idx
-                emb_lookup = self.things_emb_idx_to_row
-                legacy_row = things_row
+            # Pre-computed generation targets (zero fallback if unavailable)
+            clip_target_bigG = np.zeros((256, 1664), dtype = np.float32)
+            vae_latents = np.zeros((4, 28, 28), dtype = np.float32)
+            cnx_features = np.zeros((49, 512), dtype = np.float32)
+            # if image data available
+            if self.has_images:
+                # select corresponding embedding index
+                if self.emb_source == "nsd":
+                    emb_idx = nsd_img_idx
+                else:  # "things"
+                    emb_idx = things_img_idx
+                # load from lookup dict built from embedding dataframe
+                row = self.emb_idx_to_row.get(emb_idx, None)
+                # assert row not None and has needed fields
+                assert row is not None, f"Missing embedding row for index {emb_idx}"
+                assert "clip_bigG_embeddings" in row and "vae_latents" in row and "cnx_features" in row, \
+                    f"Missing required fields in embedding row for index {emb_idx}"
+                # Load embeddings
+                if "clip_bigG_embeddings" in row and row["clip_bigG_embeddings"] is not None:
+                    clip_target_bigG = row["clip_bigG_embeddings"].astype(np.float32)
+                if "vae_latents" in row and row["vae_latents"] is not None:
+                    vae_latents = row["vae_latents"].astype(np.float32)
+                if "cnx_features" in row and row["cnx_features"] is not None:
+                    cnx_features = row["cnx_features"].astype(np.float32)
 
-            if emb_idx in emb_lookup:
-                emb_row = emb_lookup[emb_idx]
-                if "clip_bigG_embeddings" in emb_row and emb_row["clip_bigG_embeddings"] is not None:
-                    clip_target_bigG = emb_row["clip_bigG_embeddings"].astype(np.float32)
-                if "vae_latents" in emb_row and emb_row["vae_latents"] is not None:
-                    vae_latents = emb_row["vae_latents"].astype(np.float32)
-                if "cnx_features" in emb_row and emb_row["cnx_features"] is not None:
-                    cnx_features = emb_row["cnx_features"].astype(np.float32)
-            elif legacy_row is not None:
-                # Legacy fallback: read from images_df if emb pkl not available
-                if "clip_bigG_embeddings" in legacy_row and legacy_row["clip_bigG_embeddings"] is not None:
-                    clip_target_bigG = legacy_row["clip_bigG_embeddings"].astype(np.float32)
-                if "vae_latents" in legacy_row and legacy_row["vae_latents"] is not None:
-                    vae_latents = legacy_row["vae_latents"].astype(np.float32)
-                if "cnx_features" in legacy_row and legacy_row["cnx_features"] is not None:
-                    cnx_features = legacy_row["cnx_features"].astype(np.float32)
-
+        # return everything
         return EEG, fMRI, label, \
                things_img_idx, nsd_img_idx, \
                things_clip_embed, nsd_clip_embed, \
@@ -342,81 +296,84 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             torch.from_numpy(cnx_features).float(),
         )
 
+    @staticmethod
+    def load_shared_data(images_df_dir: str, emb_source: str) -> dict:
 
-def _load_shared_data(images_df_dir: str, emb_source: str) -> dict:
-    """Load image DataFrames and embeddings once, returning lookup dicts to share across splits."""
-    things_images_df_path = os.path.join(images_df_dir, "./things_images_df.pkl")
-    nsd_images_df_path = os.path.join(images_df_dir, "./nsd_images_df.pkl")
+        """
+        Load image DataFrames and embeddings once, 
+        returning lookup dicts to share across splits.
+        """
 
-    things_img_idx_to_row = {}
-    nsd_img_idx_to_row = {}
-    nsd_emb_idx_to_row = {}
-    things_emb_idx_to_row = {}
-    has_images = False
+        # Get paths to dataframe
+        things_images_df_path = os.path.join(images_df_dir, "./things_images_df.pkl")
+        nsd_images_df_path = os.path.join(images_df_dir, "./nsd_images_df.pkl")
+        # Make embedding pkl path
+        # join <source_images_df_path>_emb.pkl based on emb_source
+        emb_df_path = (things_images_df_path if emb_source == "things" else nsd_images_df_path).replace("_images_df.pkl", "_images_emb.pkl")
 
-    if os.path.exists(things_images_df_path) and os.path.exists(nsd_images_df_path):
-        things_images_df = pd.read_pickle(things_images_df_path)
-        nsd_images_df = pd.read_pickle(nsd_images_df_path)
+        # Initialize empty lookup dicts and flag
+        # NOTE: we only load the requested embeddings
+        things_img_idx_to_row = {}
+        nsd_img_idx_to_row = {}
+        emb_idx_to_row = {}
+        has_images = False
 
-        for _, row in things_images_df.iterrows():
-            things_img_idx_to_row[int(row["image_index"])] = row
-        for _, row in nsd_images_df.iterrows():
-            nsd_img_idx_to_row[int(row["image_index"])] = row
+        # Load image DataFrames and build lookup dicts if both files exist
+        if os.path.exists(things_images_df_path) and \
+            os.path.exists(nsd_images_df_path) and \
+            os.path.exists(emb_df_path):
 
-        print(
-            f"\033[92mSuccessfully loaded THINGS and NSD images DataFrames from {images_df_dir}. Image data and CLIP embeddings are available.\033[0m"
-        )
-        has_images = True
+            # Load the DataFrames
+            # NOTE: this is the repacked image dataframe
+            things_images_df = pd.read_pickle(things_images_df_path)
+            nsd_images_df = pd.read_pickle(nsd_images_df_path)
 
-        # Only load the emb pkl matching emb_source
-        if emb_source == "nsd":
-            nsd_emb_path = os.path.join(images_df_dir, "nsd_images_emb.pkl")
-            if os.path.exists(nsd_emb_path):
-                nsd_emb_df = pd.read_pickle(nsd_emb_path)
-                for _, row in nsd_emb_df.iterrows():
-                    nsd_emb_idx_to_row[int(row["image_index"])] = row
-                print(
-                    f"\033[92mLoaded NSD embeddings DataFrame from {nsd_emb_path} ({len(nsd_emb_df)} entries).\033[0m"
-                )
-            else:
-                print(
-                    f"\033[93mWarning: NSD embeddings DataFrame not found at {nsd_emb_path}. "
-                    f"Will fall back to nsd_images_df for generation targets (legacy mode).\033[0m"
-                )
-        else:  # "things"
-            things_emb_path = os.path.join(images_df_dir, "things_images_emb.pkl")
-            if os.path.exists(things_emb_path):
-                things_emb_df = pd.read_pickle(things_emb_path)
-                for _, row in things_emb_df.iterrows():
-                    things_emb_idx_to_row[int(row["image_index"])] = row
-                print(
-                    f"\033[92mLoaded THINGS embeddings DataFrame from {things_emb_path} ({len(things_emb_df)} entries).\033[0m"
-                )
-            else:
-                print(
-                    f"\033[93mWarning: THINGS embeddings DataFrame not found at {things_emb_path}. "
-                    f"Will fall back to things_images_df for generation targets (legacy mode).\033[0m"
-                )
-    else:
-        if not os.path.exists(things_images_df_path):
+            # Build index lookup for fast access
+            # NOTE: {image_index : row}
+            #       row is the single row in dataframe
+            for _, row in things_images_df.iterrows():
+                things_img_idx_to_row[int(row["image_index"])] = row
+            for _, row in nsd_images_df.iterrows():
+                nsd_img_idx_to_row[int(row["image_index"])] = row
+
+            # verbose
             print(
-                f"\033[91mWarning: THINGS images DataFrame not found at {things_images_df_path}. "
-                f"Image data and CLIP embeddings will be unavailable.\033[0m"
-            )
-        if not os.path.exists(nsd_images_df_path):
-            print(
-                f"\033[91mWarning: NSD images DataFrame not found at {nsd_images_df_path}. "
-                f"Image data and CLIP embeddings will be unavailable.\033[0m"
+                f"\033[92mSuccessfully loaded THINGS and NSD images DataFrames from {images_df_dir}.\033[0m"
             )
 
-    return {
-        "things_img_idx_to_row": things_img_idx_to_row,
-        "nsd_img_idx_to_row": nsd_img_idx_to_row,
-        "nsd_emb_idx_to_row": nsd_emb_idx_to_row,
-        "things_emb_idx_to_row": things_emb_idx_to_row,
-        "has_images": has_images,
-    }
+            # Load 3 extra embedding pickle
+            emb_df = pd.read_pickle(emb_df_path)
+            for _ , row in emb_df.iterrows():
+                emb_idx_to_row[int(row["image_index"])] = row
+            print(
+                f"\033[92mLoaded {emb_source} embeddings DataFrame from {emb_df_path} ({len(emb_df)} entries).\033[0m"
+            )
 
+        else:
+            if not os.path.exists(things_images_df_path):
+                print(
+                    f"\033[91mWarning: THINGS images DataFrame not found at {things_images_df_path}.\033[0m"
+                )
+            if not os.path.exists(nsd_images_df_path):
+                print(
+                    f"\033[91mWarning: NSD images DataFrame not found at {nsd_images_df_path}.\033[0m"
+                )
+            if not os.path.exists(emb_df_path):
+                print(
+                    f"\033[91mWarning: Embeddings DataFrame for {emb_source} not found at {emb_df_path}.\033[0m"
+                )
+            # Print not available warning
+            print(
+                f"\033[93mImage data and/or embeddings not available. "
+                f"All embeddings and raw images will be returned as zero vectors.\033[0m"
+            )
+
+        return {
+            "things_img_idx_to_row": things_img_idx_to_row,
+            "nsd_img_idx_to_row": nsd_img_idx_to_row,
+            "emb_idx_to_row": emb_idx_to_row,
+            "has_images": has_images,
+        }
 
 def get_generation_data_loader(
     datasets_dir: str,
@@ -425,8 +382,9 @@ def get_generation_data_loader(
     normalize_fmri: bool = True,
     load_images: bool = False,
     num_workers: int = 0,
-    emb_source: str = "nsd",
+    emb_source: str = "things",
 ) -> typing.Dict[str, DataLoader]:
+    
     """
     Create data loaders for the generation E2E pipeline.
     Args:
@@ -436,10 +394,11 @@ def get_generation_data_loader(
         normalize_fmri: Whether to L2-normalize the fMRI vectors. Default is True.
         load_images: Whether to load CLIP embeddings and raw images (for blurry reconstruction target). Default is False.
         num_workers: Number of worker processes for data loading. Default is 0 (no multiprocessing).
+        emb_source: Source for generation targets — 'nsd' or 'things'. Default is 'things'.
     """
     # Load pkl data once and share across all splits
     print("Loading shared image/embedding data...")
-    shared_data = _load_shared_data(images_df_dir, emb_source)
+    shared_data = EEG_fMRI_Generation_E2E_Dataset.load_shared_data(images_df_dir, emb_source)
 
     # Set up datasets
     print(f"Setting up training dataset:")
@@ -508,13 +467,14 @@ def get_generation_data_loader(
 
 # Test code
 if __name__ == "__main__":
+
     datasets_dir = \
         "datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01"
     images_df_dir = "datasets/processed"
     batch_size = 16
     
     data_loader = get_generation_data_loader(
-        datasets_dir, images_df_dir, batch_size
+        datasets_dir, images_df_dir, batch_size, emb_source = 'nsd'
     )
 
     for (
