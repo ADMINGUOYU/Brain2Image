@@ -4,10 +4,6 @@
 # transformer package is required to run this script.
 # run "pip install transformers" to install the package.
 
-"""
-Please use 'python -m datasets.nsd-fmri_repack' to run this script.
-"""
-
 # We'll save the processed data in pandas.DataFrame:
 # (fmri / image_index / subject / split / sample_id / tar_path).
 # We'll also index every unique images within the used coco dataset
@@ -31,6 +27,10 @@ import os
 os.environ['TRANSFORMERS_CACHE'] = 'datasets/transformers_cache'
 os.environ['HF_HOME'] = 'datasets/transformers_cache'
 os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
+# Set Hugging Face mirror (if needed)
+# os.environ["HF_ENDPOINT"] = "<MIRROR END POINT>"
+# set proxy (if needed)
+# os.environ['NO_PROXY'] = 'huggingface.co'
 
 # import necessary libraries
 import torch
@@ -50,7 +50,7 @@ processed_data_dir = 'datasets/processed'
 os.makedirs(processed_data_dir, exist_ok = True)
 
 # we specify the subjects we want to process
-subject_wanted = ['sub-01'] # 8 in total
+subject_wanted = ['sub-01'] # 8 in total (actually 4 -> sub-01, sub-02, sub-05, sub-07)
 
 # CUDA device configuration
 CUDA = 0
@@ -169,6 +169,7 @@ def process_nsd_fmri_image_all_subjects():
                     # process the image using CLIPProcessor and CLIPModel to get its embedding
                     with torch.no_grad():
                         # CLIP-ViT-L/14 embedding
+                        # NOTE: we will later use this to calculate similarity with THINGS images
                         inputs = processor(images = image_numpy, return_tensors = 'pt').to(device)
                         image_embedding = model.get_image_features(**inputs).pooler_output.cpu().squeeze().numpy()
                         # image_embedding = model.get_image_features(**inputs).cpu().squeeze().numpy()
@@ -194,11 +195,6 @@ def process_nsd_fmri_image_all_subjects():
     images_df.to_pickle(os.path.join(processed_data_dir, 'nsd_images_df.pkl'))
 
 if __name__ == "__main__":
-
-    # set huggingface mirror
-    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
-    # exit()
 
     # check if the processed data already exists
     subjects_df_path = os.path.join(processed_data_dir, 'nsd_fmri_data_df.pkl')

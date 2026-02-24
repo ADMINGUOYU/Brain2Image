@@ -16,14 +16,14 @@
 
 # import os
 import os
-
-# # set proxy
-# os.environ['NO_PROXY'] = 'huggingface.co'
-
 # set transformers cache directory
 os.environ['TRANSFORMERS_CACHE'] = 'datasets/transformers_cache'
 os.environ['HF_HOME'] = 'datasets/transformers_cache'
 os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
+# Set Hugging Face mirror (if needed)
+# os.environ["HF_ENDPOINT"] = "<MIRROR END POINT>"
+# set proxy (if needed)
+# os.environ['NO_PROXY'] = 'huggingface.co'
 
 # import necessary libraries
 import torch
@@ -31,7 +31,6 @@ import pandas as pd
 import numpy as np
 from transformers import CLIPModel, CLIPProcessor
 from PIL import Image
-from torchvision import transforms
 from tqdm import tqdm
 
 # Data path (root folder to all subjects / images)
@@ -42,6 +41,9 @@ os.makedirs(processed_data_dir, exist_ok = True)
 
 # we specify the subjects we want to process
 subject_wanted = ['sub-01'] # 10 in total
+
+# CUDA device configuration
+CUDA = 0
 
 # ---------------- End of configuration ---------------- #
 
@@ -123,7 +125,7 @@ def process_things_image_data() -> None:
     # we use CLIPModel to process the images and get the embeddings
     # our image already in the format of (224, 224, 3)
     # we directly use get_image_features() to get the embeddings
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f'cuda:{CUDA}') if torch.cuda.is_available() else torch.device('cpu')
     model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
     def get_image_embedding(image_data: np.ndarray) -> np.ndarray:
