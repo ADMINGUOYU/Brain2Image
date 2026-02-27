@@ -310,7 +310,7 @@ for things_subject, nsd_subject in subjects:
     paired_image_labels = cluster_labels[:len(paired_indices)] # (num_pairs,)
     paired_images_df['cluster_label'] = paired_image_labels
     paired_images_df.to_csv(out_csv_path, index = False)
-    print(f"Saved paired image indices with cluster labels for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv')}")
+    print(f"Saved paired image indices with cluster labels for subject THINGS {things_subject} and NSD {nsd_subject} to {out_csv_path}")
     # visualize the clusters in the PCA space (3D plot)
     fig = plt.figure(figsize = (8, 8), dpi = 300)
     ax = fig.add_subplot(111, projection = '3d')
