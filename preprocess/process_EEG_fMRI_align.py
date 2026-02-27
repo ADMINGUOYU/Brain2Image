@@ -311,7 +311,8 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
         'fmri_take_mean': fmri_take_mean,
         'dataset_mix_mode': dataset_mix_mode,
         'split_ratios': split_ratios,
-        'split_seed': split_seed
+        'split_seed': split_seed,
+        'exclude_THINGS_test_split': filter_things_test_split,
     }
     txn = db.begin(write = True)
     txn.put(key = 'meta_info'.encode(), value = pickle.dumps(meta_info))
