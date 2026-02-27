@@ -190,8 +190,8 @@ for things_subject, nsd_subject in subjects:
         print(f"Cosine similarity scores shape: {cosine_similarity_scores.shape}")
 
         # cache the cosine similarity score matrix
-        torch.save(cosine_similarity_scores, os.path.join(processed_dir, f"cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt"))
-        print(f"Saved cosine similarity scores for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt')}")
+        torch.save(cosine_similarity_scores, cosine_similarity_cache_path)
+        print(f"Saved cosine similarity scores for subject THINGS {things_subject} and NSD {nsd_subject} to {cosine_similarity_cache_path}")
 
     # we then get the top K paired (make sure images are one-to-one -> we don't
     # want one THINGS eeg data to be paired with multiple NSS fmri data)
