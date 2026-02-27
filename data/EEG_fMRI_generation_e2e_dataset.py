@@ -392,8 +392,9 @@ def get_generation_data_loader(
     load_images: bool = False,
     num_workers: int = 0,
     emb_source: str = "things",
+    splits: typing.Optional[typing.List[str]] = None,
 ) -> typing.Dict[str, DataLoader]:
-    
+
     """
     Create data loaders for the generation E2E pipeline.
     Args:
@@ -404,72 +405,43 @@ def get_generation_data_loader(
         load_images: Whether to load CLIP embeddings and raw images (for blurry reconstruction target). Default is False.
         num_workers: Number of worker processes for data loading. Default is 0 (no multiprocessing).
         emb_source: Source for generation targets — 'nsd' or 'things'. Default is 'things'.
+        splits: List of splits to create loaders for. Default is None (all three: train/val/test).
     """
+    if splits is None:
+        splits = ["train", "val", "test"]
+
     # Load pkl data once and share across all splits
     print("Loading shared image/embedding data...")
     shared_data = EEG_fMRI_Generation_E2E_Dataset.load_shared_data(images_df_dir, emb_source)
 
-    # Set up datasets
-    print(f"Setting up training dataset:")
-    train_set = EEG_fMRI_Generation_E2E_Dataset(
-        datasets_dir,
-        images_df_dir,
-        mode = "train",
-        normalize_fmri = normalize_fmri,
-        load_images = load_images,
-        emb_source = emb_source,
-        _shared_data = shared_data,
-    )
-    print(f"Setting up validation dataset:")
-    val_set = EEG_fMRI_Generation_E2E_Dataset(
-        datasets_dir,
-        images_df_dir,
-        mode = "val",
-        normalize_fmri = normalize_fmri,
-        load_images = load_images,
-        emb_source = emb_source,
-        _shared_data = shared_data,
-    )
-    print(f"Setting up testing dataset:")
-    test_set = EEG_fMRI_Generation_E2E_Dataset(
-        datasets_dir,
-        images_df_dir,
-        mode = "test",
-        normalize_fmri = normalize_fmri,
-        load_images = load_images,
-        emb_source = emb_source,
-        _shared_data = shared_data,
-    )
+    # Set up only the requested datasets
+    datasets = {}
+    for mode in splits:
+        print(f"Setting up {mode} dataset:")
+        datasets[mode] = EEG_fMRI_Generation_E2E_Dataset(
+            datasets_dir,
+            images_df_dir,
+            mode=mode,
+            normalize_fmri=normalize_fmri,
+            load_images=load_images,
+            emb_source=emb_source,
+            _shared_data=shared_data,
+        )
 
-    print(
-        f"Dataset sizes: train = {len(train_set)}, "
-        f"val = {len(val_set)}, test = {len(test_set)}"
-    )
-    print(f"Total samples: {len(train_set) + len(val_set) + len(test_set)}")
+    sizes_str = ", ".join(f"{m} = {len(datasets[m])}" for m in splits)
+    print(f"Dataset sizes: {sizes_str}")
+    print(f"Total samples: {sum(len(datasets[m]) for m in splits)}")
     print(f"fMRI normalization: {'enabled' if normalize_fmri else 'disabled'}")
 
     data_loader = {
-        "train": DataLoader(
-            train_set,
-            batch_size = batch_size,
-            collate_fn = train_set.collate,
-            shuffle = True,
-            num_workers = num_workers,
-        ),
-        "val": DataLoader(
-            val_set,
-            batch_size = batch_size,
-            collate_fn = val_set.collate,
-            shuffle = False,
-            num_workers = num_workers,
-        ),
-        "test": DataLoader(
-            test_set,
-            batch_size = batch_size,
-            collate_fn = test_set.collate,
-            shuffle = False,
-            num_workers = num_workers,
-        ),
+        mode: DataLoader(
+            datasets[mode],
+            batch_size=batch_size,
+            collate_fn=datasets[mode].collate,
+            shuffle=(mode == "train"),
+            num_workers=num_workers,
+        )
+        for mode in splits
     }
     return data_loader
 

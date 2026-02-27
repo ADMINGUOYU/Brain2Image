@@ -14,7 +14,9 @@
       "Bash(wc:*)",
       "Bash(git:*)",
       "Bash(python3:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(grep -r \"unclip6_epoch0_step110000\\\\|sd_image_var_autoenc\\\\|bigG_to_L\" /mnt/afs/250010218/Brain2Image --include=\"*.py\" --include=\"*.sh\" --include=\"*.ipynb\" 2>/dev/null | head -20)",
+      "Bash(find /mnt/afs/250010218/Brain2Image -name \"unclip*.ckpt\" -o -name \"unclip*.pth\" 2>/dev/null | head -5\nfind /mnt/afs/250010218/Brain2Image -name \"sd_image_var_autoenc*\" 2>/dev/null | head -5)"
     ]
   }
 }
