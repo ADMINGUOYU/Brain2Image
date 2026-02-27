@@ -39,6 +39,7 @@ def get_args() -> argparse.Namespace:
     # Encoder backbone settings
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'])
     parser.add_argument('--freeze_encoder', type=lambda x: x.lower() == 'true', default=False)
+    parser.add_argument('--freeze_mindeye2', type=lambda x: x.lower() == 'true', default=False) 
     parser.add_argument('--use_pretrained_weights', type=lambda x: x.lower() == 'true', default=True)
     parser.add_argument('--foundation_dir', type=str, default=None, help='Directory containing pretrained weights for the encoder backbone (CBraMod or ATMS)')
 
@@ -373,6 +374,14 @@ if __name__ == "__main__":
         for param in model.align_model.eeg_encoder.parameters():
             param.requires_grad = False
         print("Frozen EEG encoder parameters")
+
+    # Freeze MindEye2 generation modules if specified
+    if args.freeze_mindeye2:
+        for param in model.brain_network.parameters():
+            param.requires_grad = False
+        for param in model.diffusion_prior.parameters():
+            param.requires_grad = False
+        print("Frozen MindEye2 generation module parameters")
 
     # ── Optimizer setup (MindEye2-style weight decay separation) ──
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']

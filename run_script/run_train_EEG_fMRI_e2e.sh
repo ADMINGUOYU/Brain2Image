@@ -32,6 +32,7 @@ MindEYE2_CKPT_PATH="datasets/processed/mindeye2/sub-01_last_full.pth"
 
 # Model Configuration
 FREEZE_ENCODER="false"
+FREEZE_MINDEYE2="false"
 USE_PRETRAINED_WEIGHTS="true"
 MODEL_DIR=""           # Full E2E checkpoint (only set if resuming)
 ALIGN_MODEL_DIR=""     # Pretrained alignment checkpoint (warm-start)
@@ -100,6 +101,7 @@ CMD="python -m train.train_EEG_fMRI_e2e \
     --use_amp $USE_AMP \
     --backbone $EEG_ENCODER_TYPE \
     --freeze_encoder $FREEZE_ENCODER \
+    --freeze_mindeye2 $FREEZE_MINDEYE2 \
     --use_pretrained_weights $USE_PRETRAINED_WEIGHTS \
     --datasets_dir $DATASETS_DIR \
     --images_df_dir $IMAGES_DF_DIR \
