@@ -64,6 +64,11 @@ TARGET_FREQ = 250 # for ATM
 eeg_take_mean = False
 fmri_take_mean = False
 
+# If we need to load filtered THINGS test split's CSV
+# NOTE: if True, we will look for the CSV file with "_no_things_test" suffix
+#       and we will also save the processed dataset with "_no_things_test" suffix to avoid confusion
+filter_things_test_split = False
+
 # Dataset mix mode
 # NOTE: Mean processing will reduce number of samples to 1 !!!
 # -> 'cross': if EEG has 4 samples per image, fMRI has 3 samples per image
@@ -127,6 +132,8 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
     # in file: paired_images_subject_THINGS_<things_subj>_NSD_<nsd_subject>.csv
     # csv has 3 columns: things_image_index, nsd_image_index, cluster_label
     match_data_path = f"{processed_dir}/paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv"
+    if filter_things_test_split:
+        match_data_path = f"{processed_dir}/paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}_no_things_test.csv"
     if not os.path.exists(match_data_path):
         print(f"Paired data file not found at {match_data_path}. Make sure to run ./preprocess/process_things_nsd_images_clustering.py first to generate the paired data.")
         continue
@@ -287,6 +294,9 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
 
     # We init lmdb
     output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subject}_{TARGET_FREQ}Hz"
+    # append "_no_things_test" to output_dir name if we are using filtered test split to avoid confusion
+    if filter_things_test_split:
+        output_dir += "_no_things_test"
     os.makedirs(output_dir, exist_ok = True)
     # Remove output_dir if already exists to avoid confusion
     if os.path.exists(output_dir):

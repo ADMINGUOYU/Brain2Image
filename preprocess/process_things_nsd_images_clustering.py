@@ -39,6 +39,11 @@ things_images_df_path = os.path.join(processed_dir, "things_images_df.pkl")
 # NOTE: in (things subject, nsd subject)
 subjects =  [('sub-01', 'sub-01')]
 
+# Filter THINGS eeg test split images
+# NOTE: THINGS test set has 80 trails instead of 4 per image
+# NOTE: we append "_no_things_test" to the output file name if we filter the test split to avoid confusion
+filter_things_test_split = False
+
 # top paired images we want to get for each subject
 # NOTE: if we don't have that amount of paired images,
 #       we get as much as we can
@@ -105,6 +110,10 @@ for things_subject, nsd_subject in subjects:
     things_eeg_data_df = things_eeg_data_df[things_eeg_data_df['subject'] == things_subject]
     # verbose
     print(f"Number of rows in things_eeg_data_df for {things_subject}: {len(things_eeg_data_df)}")
+    # Drop test split if specified
+    if filter_things_test_split:
+        things_eeg_data_df = things_eeg_data_df[things_eeg_data_df['split'] != 'test']
+        print(f"Number of rows in things_eeg_data_df for {things_subject} after filtering test split: {len(things_eeg_data_df)}")
     # we get the unique image indices viewed by the current subject
     # save it to list and unload the things_eeg_data_df to save memory
     things_subject_image_indices = things_eeg_data_df['image_index'].unique().tolist()
@@ -152,6 +161,10 @@ for things_subject, nsd_subject in subjects:
 
     # check if we have the cached similarity matrix file ready
     cosine_similarity_cache_path = os.path.join(processed_dir, f"cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}.pt")
+    # If drop test append "_no_things_test" to the cache file name to avoid confusion
+    if filter_things_test_split:
+        cosine_similarity_cache_path = os.path.join(processed_dir, f"cosine_similarity_scores_subject_THINGS_{things_subject}_NSD_{nsd_subject}_no_things_test.pt")
+    # Load cache or compute similarity scores
     if os.path.exists(cosine_similarity_cache_path):
         cosine_similarity_scores: torch.Tensor = torch.load(cosine_similarity_cache_path)
         print(f"Loaded cached cosine similarity scores for subject THINGS {things_subject} and NSD {nsd_subject} from {cosine_similarity_cache_path}.")
@@ -239,8 +252,12 @@ for things_subject, nsd_subject in subjects:
 
     # save the index of the paired images to a csv file for later use
     paired_images_df = pd.DataFrame(paired_image_indices, columns = ['things_image_index', 'nsd_image_index'])
-    paired_images_df.to_csv(os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv"), index = False)
-    print(f"Saved paired image indices for subject THINGS {things_subject} and NSD {nsd_subject} to {os.path.join(processed_dir, f'paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv')}")
+    # If filtered test split appen "_no_things_test" to csv file name
+    out_csv_path = os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv")
+    if filter_things_test_split:
+        out_csv_path = os.path.join(processed_dir, f"paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}_no_things_test.csv")
+    paired_images_df.to_csv(out_csv_path, index = False)
+    print(f"Saved paired image indices for subject THINGS {things_subject} and NSD {nsd_subject} to {out_csv_path}")
 
     # Now we want to do PCA analysis to the paired images perform clustering
     # fetch the embeddings upon the indexes we got
