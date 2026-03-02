@@ -232,15 +232,19 @@ def train(model: EEG_fMRI_E2E,
               f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
 
         # ── Checkpointing (best val total loss) ──
-        if avg_val['total'] < best_val_loss:
-            best_val_loss = avg_val['total']
-            for filename in os.listdir(ckpt_dir):
-                file_path = os.path.join(ckpt_dir, filename)
-                if os.path.isfile(file_path):
-                    os.unlink(file_path)
-            checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
+        if (epoch + 1) % 50 == 0:
+            checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
             model.save_model(checkpoint_path)
-            print(f"Saved best model to {checkpoint_path}")
+            print(f"Saved checkpoint to {checkpoint_path}")
+        # if avg_val['total'] < best_val_loss:
+        #     best_val_loss = avg_val['total']
+        #     for filename in os.listdir(ckpt_dir):
+        #         file_path = os.path.join(ckpt_dir, filename)
+        #         if os.path.isfile(file_path):
+        #             os.unlink(file_path)
+        #     checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
+        #     model.save_model(checkpoint_path)
+        #     print(f"Saved best model to {checkpoint_path}")
 
         # ── TensorBoard logging ──
         if logger is not None:
@@ -273,7 +277,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Create experiment folder
-    log_dir = f"runs/EEG_fMRI_e2e_{int(time())}"
+    log_dir = f"runs/Mar01/EEG_fMRI_e2e_{int(time())}"
     os.makedirs(log_dir, exist_ok=True)
     tensorboard_dir = f"{log_dir}/tensorboard"
     ckpt_dir = f"{log_dir}/checkpoints"

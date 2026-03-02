@@ -68,6 +68,31 @@ python -m train.train_EEG_fMRI_e2e \
 
 Checkpoints and TensorBoard logs go to `runs/<task>_<timestamp>/`.
 
+## Inference
+
+After training an E2E model, run image reconstruction:
+
+```bash
+bash run_script/run_infer_EEG_fMRI_e2e.sh
+```
+
+Or directly:
+```bash
+python -m infer.infer_EEG_fMRI_e2e \
+    --model_dir runs/<experiment>/checkpoints/best_model_epoch_1.pth \
+    --datasets_dir datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_250Hz \
+    --unclip_ckpt datasets/processed/mindeye2/unclip6_epoch0_step110000.ckpt \
+    --unclip_config MindEyeV2/src/generative_models/configs/unclip6.yaml \
+    --output_dir <experiment>/inference \
+    --split test --prior_timesteps 20
+```
+
+Inference requires two additional checkpoints not used at training time:
+- `unclip6_epoch0_step110000.ckpt` — unCLIP model for CLIP-token → image decoding
+- `sd_image_var_autoenc.pth` — SD VAE autoencoder (only needed if `--save_blurry true`)
+
+Output layout: `<output_dir>/images/<split>_sample_NNNNN_{orig,recon,blurry}.png` + `metrics.json`.
+
 ## Architecture
 
 **Data flow:**
@@ -126,12 +151,16 @@ NSD-fMRI → MindEye2 ───────┘   (fMRI projected to 4096-dim via
 | `train/train_EEG_fMRI_align.py` | Alignment training loop |
 | `train/train_EEG_fMRI_e2e.py` | E2E generation training loop |
 | `train/train_EEG_classify.py` | Classification training loop |
+| `infer/infer_EEG_fMRI_e2e.py` | Inference: load E2E checkpoint → reconstruct images |
 | `preprocess/process_EEG_fMRI_align.py` | Builds LMDB dataset from repacked data |
 | `preprocess/process_things_nsd_images_clustering.py` | Image matching via CLIP + K-means |
+| `datasets/LABEL_REFERENCE.md` | Schema for THINGS-EEG and NSD label/field formats |
 
 ## Notes
 
 - No formal test suite; modules have `if __name__ == "__main__"` blocks for ad-hoc testing.
 - No linting or formatting configuration is set up.
-- `MindEyeV2/` is a separate git repo (cloned from MedARC-AI/MindEyeV2) used for fMRI ridge regression. It is gitignored from the main repo.
+- `MindEyeV2/` is a separate git repo (cloned from MedARC-AI/MindEyeV2) used for fMRI ridge regression. It is gitignored from the main repo. The `infer/` script adds `MindEyeV2/src` and `MindEyeV2/src/generative_models` to `sys.path` at runtime to import the `sgm` package.
 - Alignment training uses AdamW + CosineAnnealingLR; E2E training uses AdamW + OneCycleLR.
+- The E2E training log dir is currently hardcoded as `runs/Mar01/EEG_fMRI_e2e_<timestamp>/` in `train_EEG_fMRI_e2e.py`.
+- Inference with `--max_batches N` limits batches processed — useful for quick smoke-tests.
