@@ -25,10 +25,10 @@
 # The dataset will be saved in lmdb format, with the following keys:
 # 'train': {
 #     'eeg': list of EEG data (num_samples, num_channels, num_timepoints)
-#     'fmri': list of fMRI data (num_samples, embedding_dim)
+#     'nsd_data': list of dicts, one per NSD subject:
+#         [{'subject': str, 'fmri': (1, 4096), 'nsd_img_idx': int}, ...]
 #     'label': list of labels (image clustered category)
 #     'things_img_idx': list of image indices corresponding to each sample
-#     'nsd_img_idx': list of image indices corresponding to each sample
 # }
 # 'val': { ... }
 # 'test': { ... }
@@ -36,6 +36,7 @@
 # Import necessary libraries
 import os
 import torch
+import typing
 import numpy as np
 import pandas as pd
 import lmdb
@@ -52,9 +53,12 @@ processed_dir = "datasets/processed"
 # The subjects we want to use 
 # NOTE: please make sure you've processed the paired data
 #       using ./preprocess/process_things_nsd_images_clustering.py
-# NOTE: in (things subject, nsd subject)
+#       OR   ./preprocess/process_things_nsd_images_multi_subject_clustering.py
 # NOTE: we LOOP every combination of subjects
-subjects =  [('sub-01', 'sub-01')]
+# Format: (things_subject, nsd_subject_or_tuple)
+#   Single NSD subject:   ('sub-01', 'sub-01')
+#   Multiple NSD subjects: ('sub-01', ('sub-01', 'sub-02', 'sub-05', 'sub-07'))
+subjects =  [('sub-01', ('sub-01', 'sub-02', 'sub-05', 'sub-07'))]
 
 # EEG resampling parameters
 TARGET_FREQ = 250 # for ATM
@@ -62,12 +66,12 @@ TARGET_FREQ = 250 # for ATM
 
 # Mean processing
 eeg_take_mean = False
-fmri_take_mean = False
+fmri_take_mean = True   # NOTE: we take subject-wise mean (NOT) cross mean
 
 # If we need to load filtered THINGS test split's CSV
 # NOTE: if True, we will look for the CSV file with "_no_things_test" suffix
 #       and we will also save the processed dataset with "_no_things_test" suffix to avoid confusion
-filter_things_test_split = False
+filter_things_test_split = True
 
 # Dataset mix mode
 # NOTE: Mean processing will reduce number of samples to 1 !!!
@@ -119,30 +123,59 @@ def download_ckpt(subject_number: int):
     else:
         print(f"Checkpoint for subject {subject_number} already exists at {ckpt_path}.")
     return ckpt_path
-# Now, we download
-mindeye2_ckpts = []
+
+
+# Normalize subjects list to ensure all NSD subjects are in tuple form for uniform handling
+subjects = [(things, nsd) if isinstance(nsd, tuple) else (things, (nsd,)) for things, nsd in subjects]
+# We sort the NSD subjects in each tuple to ensure consistent ordering (important for naming and pairing)
+subjects = [(things, tuple(sorted(nsd))) for things, nsd in subjects]
+
+# Now, we download checkpoints for all NSD subjects
+mindeye2_ckpts = []  # list of lists: one list of ckpt paths per subject config
 for _, nsd_subject in subjects:
-    mindeye2_ckpts.append(download_ckpt(int(nsd_subject[-2:])))
+    ckpt_list = []
+    for ns in nsd_subject:
+        ckpt_list.append(download_ckpt(int(ns[-2:])))
+    mindeye2_ckpts.append(ckpt_list)
 
 # Now we loop through the paired data and construct the dataset
-for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts):
-    print(f"\nProcessing subject pair: Things {things_subject} and NSD {nsd_subject}")
+for (things_subject, nsd_subject_tuple), mindeye2_ckpt_list in zip(subjects, mindeye2_ckpts):
 
-    # Load paired data
-    # in file: paired_images_subject_THINGS_<things_subj>_NSD_<nsd_subject>.csv
-    # csv has 3 columns: things_image_index, nsd_image_index, cluster_label
-    match_data_path = f"{processed_dir}/paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}.csv"
-    if filter_things_test_split:
-        match_data_path = f"{processed_dir}/paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subject}_no_things_test.csv"
+    # Prepare NSD subject tag for naming
+    nsd_subjects_tag = "_".join(nsd_subject_tuple)
+    print(f"\nProcessing subject pair: Things {things_subject} and NSD {nsd_subject_tuple}")
+
+    # Load paired data CSV
+    # For multi-subject, the CSV was produced by process_things_nsd_images_multi_subject_clustering.py
+    # For single subject, the CSV was produced by process_things_nsd_images_clustering.py
+    test_suffix = "_no_things_test" if filter_things_test_split else ""
+    match_data_path = f"{processed_dir}/paired_images_subject_THINGS_{things_subject}_NSD_{nsd_subjects_tag}{test_suffix}.csv"
     if not os.path.exists(match_data_path):
-        print(f"Paired data file not found at {match_data_path}. Make sure to run ./preprocess/process_things_nsd_images_clustering.py first to generate the paired data.")
-        continue
-    
+        raise FileNotFoundError(f"Paired data file not found at {match_data_path}. Make sure to run the pairing script first.")
+
     # Read CSV
     match_data = pd.read_csv(match_data_path)
-    print(f"Loaded {len(match_data)} matched pairs from {match_data_path}.")
+    print(f"\033[92mLoaded {len(match_data)} matched pairs from {match_data_path}.\033[0m")
 
-    # Load things EEG data and nsd fMRI embedding data from dataframes
+    # Get lists of THINGS image indices and labels
+    things_img_idx_list = match_data['things_image_index'].tolist()
+    label_list = match_data['cluster_label'].tolist()
+
+    # Build a dict: nsd_subject -> list of nsd image indices (aligned with things_img_idx_list)
+    # NOTE: compatible with old single subject CSV
+    nsd_img_idx_lists: typing.Dict[str, typing.List[int]] = {}  # nsd_subject -> [nsd_img_idx, ...]
+    if 'nsd_image_index' in match_data.columns:
+        # Old single-subject CSV format
+        nsd_img_idx_lists[nsd_subject_tuple[0]] = match_data['nsd_image_index'].tolist()
+    else:
+        # New multi-subject CSV format: columns like nsd_sub-01_image_index, nsd_sub-02_image_index, ...
+        for ns in nsd_subject_tuple:
+            col = f'nsd_{ns}_image_index'
+            if col not in match_data.columns:
+                raise ValueError(f"Expected column '{col}' in CSV but not found. Columns: {list(match_data.columns)}")
+            nsd_img_idx_lists[ns] = match_data[col].tolist()
+
+    # Load THINGS EEG data (RAW)
     things_eeg_data_df_path = None
     for file in os.listdir(processed_dir):
         if file.startswith('things_eeg_data_df_') and file.endswith('.pkl'):
@@ -151,161 +184,151 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
                 break
     if things_eeg_data_df_path is None:
         raise FileNotFoundError(f"Could not find the things_eeg_data_df file for subject {things_subject} in {processed_dir}.")
-    nsd_fmri_data_df_path = None
-    for file in os.listdir(processed_dir):
-        if file.startswith('nsd_fmri_data_df_') and file.endswith('.pkl'):
-            if nsd_subject in file:
-                nsd_fmri_data_df_path = os.path.join(processed_dir, file)
-                break
-    if nsd_fmri_data_df_path is None:
-        raise FileNotFoundError(f"Could not find the nsd_fmri_data_df file for subject {nsd_subject} in {processed_dir}.")
     things_eeg_data_df = pd.read_pickle(things_eeg_data_df_path)
     things_eeg_data_df = things_eeg_data_df[things_eeg_data_df['subject'] == things_subject]
-    nsd_fmri_data_df = pd.read_pickle(nsd_fmri_data_df_path)
-    nsd_fmri_data_df = nsd_fmri_data_df[nsd_fmri_data_df['subject'] == nsd_subject]
-    print(f"Loaded things EEG data with {len(things_eeg_data_df)} samples and NSD fMRI data with {len(nsd_fmri_data_df)} samples.")
+    print(f"\033[92mLoaded things EEG data with {len(things_eeg_data_df)} samples.\033[0m")
 
-    # Get index pairs and labels from match_data
-    things_img_idx_list = match_data['things_image_index'].tolist()
-    nsd_img_idx_list = match_data['nsd_image_index'].tolist()
-    label_list = match_data['cluster_label'].tolist()
-    # Now we fetch eeg and fmri data for each matched pair
-    # based on things_image_index and nsd_image_index
-    eeg_data_list = []
-    fmri_data_list = []
-    for things_img_idx, nsd_img_idx in zip(things_img_idx_list, nsd_img_idx_list):
-        
-        # Fetch EEG data for the things image index
+    # Load fMRI data and apply ridge regression for each NSD subject
+    # Result: per_subject_fmri[nsd_subject] = list of hidden arrays (one per matched pair)
+    per_subject_fmri: typing.Dict[str, typing.List[np.ndarray]] = {}  # nsd_subject -> list of np.ndarray (num_trials, 4096)
+    # assert
+    assert len(nsd_subject_tuple) == len(mindeye2_ckpt_list), \
+        f"Number of NSD subjects in tuple ({len(nsd_subject_tuple)}) does not match number of downloaded ckpt lists ({len(mindeye2_ckpt_list)})."
+    # LOOP for each NSD subject
+    for ns, mindeye2_ckpt in zip(nsd_subject_tuple, mindeye2_ckpt_list):
+        print(f"\n>>> Loading fMRI data for NSD {ns} >>>")
+        nsd_fmri_data_df_path = None
+        for file in os.listdir(processed_dir):
+            if file.startswith('nsd_fmri_data_df_') and file.endswith('.pkl'):
+                if ns in file:
+                    nsd_fmri_data_df_path = os.path.join(processed_dir, file)
+                    break
+        if nsd_fmri_data_df_path is None:
+            raise FileNotFoundError(f"Could not find the nsd_fmri_data_df file for subject {ns} in {processed_dir}.")
+        nsd_fmri_data_df = pd.read_pickle(nsd_fmri_data_df_path)
+        nsd_fmri_data_df = nsd_fmri_data_df[nsd_fmri_data_df['subject'] == ns]
+        print(f"\033[92mLoaded NSD {ns}: {len(nsd_fmri_data_df)} fMRI samples.\033[0m")
+
+        # Fetch fMRI data for each matched pair
+        fmri_data_raw: typing.List[np.ndarray] = []
+        nsd_idx_list = nsd_img_idx_lists[ns]
+        for nsd_img_idx in nsd_idx_list:
+            fmri_row = nsd_fmri_data_df[nsd_fmri_data_df['image_index'] == nsd_img_idx]
+            if len(fmri_row) == 0:
+                raise ValueError(f"No fMRI data found for NSD {ns} image index {nsd_img_idx}.")
+            fmri_data_raw.append(fmri_row.iloc[0]['fmri'])  # (num_trials, voxels)
+        del nsd_fmri_data_df
+
+        # Load ridge regression checkpoint and project fMRI -> 4096-dim
+        checkpoint = torch.load(mindeye2_ckpt, map_location = device)
+        ridge_state_dict = checkpoint['model_state_dict']
+        ridge_weight = ridge_state_dict['ridge.linears.0.weight']
+        ridge_bias = ridge_state_dict['ridge.linears.0.bias']
+        input_dim = ridge_weight.shape[1]
+        output_dim = ridge_weight.shape[0]
+        assert input_dim == fmri_data_raw[0].shape[1], \
+            f"Ridge input dim ({input_dim}) != fMRI dim ({fmri_data_raw[0].shape[1]}) for NSD {ns}."
+        projection_layer = torch.nn.Linear(input_dim, output_dim)
+        with torch.no_grad():
+            projection_layer.weight.copy_(ridge_weight)
+            projection_layer.bias.copy_(ridge_bias)
+            projection_layer.to(device)
+        print(f"Ridge regression ({ns}): {input_dim} -> {output_dim}")
+
+        fmri_hidden_list: typing.List[np.ndarray] = []
+        for fmri_data in tqdm(fmri_data_raw, desc = f"Projecting fMRI for NSD {ns}"):
+            fmri_tensor = torch.from_numpy(fmri_data).float().to(device)
+            with torch.no_grad():
+                hidden = projection_layer(fmri_tensor).cpu().numpy()
+            fmri_hidden_list.append(hidden)
+        per_subject_fmri[ns] = fmri_hidden_list
+        print(f"\033[92mProjected fMRI hidden shape for NSD ({ns}): {fmri_hidden_list[0].shape}\033[0m")
+        del fmri_data_raw
+
+    # Fetch EEG data for each matched pair
+    eeg_data_list: typing.List[np.ndarray] = []
+    for things_img_idx in things_img_idx_list:
         eeg_row = things_eeg_data_df[things_eeg_data_df['image_index'] == things_img_idx]
         if len(eeg_row) == 0:
-            print(f"Warning: No EEG data found for Things image index {things_img_idx}. Skipping this pair.")
-            continue
-        elif len(eeg_row) > 1:
-            print(f"Warning: Multiple EEG entries found for Things image index {things_img_idx}. Using the first one.")
-        eeg_data = eeg_row.iloc[0]['eeg']  # shape (num_trails, num_timepoints, 250 Hz)
+            raise ValueError(f"No EEG data found for Things image index {things_img_idx}.")
+        eeg_data_list.append(eeg_row.iloc[0]['eeg'])  # (num_trials, channels, timepoints)
+    del things_eeg_data_df
+    assert len(eeg_data_list) == len(things_img_idx_list)
+    print(f"\033[92mSuccessfully fetched EEG data for {len(eeg_data_list)} matched pairs.\033[0m")
 
-        # Fetch fMRI embedding data for the nsd image index
-        fmri_row = nsd_fmri_data_df[nsd_fmri_data_df['image_index'] == nsd_img_idx]
-        if len(fmri_row) == 0:
-            print(f"Warning: No fMRI data found for NSD image index {nsd_img_idx}. Skipping this pair.")
-            continue
-        elif len(fmri_row) > 1:
-            print(f"Warning: Multiple fMRI entries found for NSD image index {nsd_img_idx}. Using the first one.")
-        fmri_data = fmri_row.iloc[0]['fmri']  # shape (num_trails, voxels dimension)
-
-        # Append to lists
-        eeg_data_list.append(eeg_data)
-        fmri_data_list.append(fmri_data)
-
-    # assert we've fetched data for all pairs
-    assert len(eeg_data_list) == len(fmri_data_list) == len(label_list) == len(match_data), "Mismatch in number of samples fetched for EEG, fMRI, and labels."
-    print(f"Successfully fetched EEG and fMRI data for {len(eeg_data_list)} matched pairs.")
-
-    # Now we create the linear layer for fmri
-    # First we load the ckpt and get the ridge regression parameters
-    checkpoint = torch.load(mindeye2_ckpt, map_location = device)
-    ridge_state_dict = checkpoint['model_state_dict']
-    # Keys containing 'ridge': ['ridge.linears.0.weight', 'ridge.linears.0.bias']
-    # we only needs these two parameters for the linear layer
-    ridge_weight = ridge_state_dict['ridge.linears.0.weight']
-    ridge_bias = ridge_state_dict['ridge.linears.0.bias']
-    print(f"Loaded ridge regression parameters from checkpoint: weight shape {ridge_weight.shape}, bias shape {ridge_bias.shape}.")
-    # We infer the input and output dimension from the weight shape
-    input_dim = ridge_weight.shape[1]
-    output_dim = ridge_weight.shape[0]
-    print(f"Inferred ridge regression input dimension: {input_dim}, output dimension: {output_dim}.")
-    # assert
-    assert input_dim == fmri_data_list[0].shape[1], f"Input dimension of ridge regression ({input_dim}) does not match fMRI data dimension ({fmri_data_list[0].shape[1]})."
-    # We create the torch linear layer and set its parameters
-    projection_layer = torch.nn.Linear(input_dim, output_dim)
-    with torch.no_grad():
-        projection_layer.weight.copy_(ridge_weight)
-        projection_layer.bias.copy_(ridge_bias)
-        projection_layer.to(device)
-        print("Created projection layer and loaded ridge regression parameters.")
-    # We do the forward pass to get the hidden features for each fmri data
-    fmri_data_hidden_list = []
-    for fmri_data in tqdm(fmri_data_list, desc = "Processing fMRI data"):
-        fmri_tensor = torch.from_numpy(fmri_data).float().to(device)
-        with torch.no_grad():
-            hidden_features = projection_layer(fmri_tensor).cpu().numpy()
-        fmri_data_hidden_list.append(hidden_features)
-    print(f"Processed fMRI data to hidden features with shape {fmri_data_hidden_list[0].shape}.")
-    # Assign back to fmri_data_list
-    del fmri_data_list  # free up memory
-    fmri_data_list = fmri_data_hidden_list
-
-    # We need to resample EEG data 250 Hz -> 200 Hz
-    # use signal library
+    # Resample EEG
     for i in tqdm(range(len(eeg_data_list)), desc = "Resampling EEG data"):
-        eeg_data = eeg_data_list[i]  # shape (num_trails, num_timepoints, 250 Hz)
-        # Resample
-        resampled_eeg = signal.resample(eeg_data, TARGET_FREQ, axis = 2)
-        eeg_data_list[i] = resampled_eeg.astype(np.float32)  # shape (num_trails, new_timepoints, 200 Hz)
-    print(f"Resampled EEG data to target frequency {TARGET_FREQ} Hz. New shape: {eeg_data_list[0].shape}.")
+        eeg_data_list[i] = signal.resample(eeg_data_list[i], TARGET_FREQ, axis = 2).astype(np.float32)
+    print(f"Resampled EEG to {TARGET_FREQ} Hz. Shape: {eeg_data_list[0].shape}")
 
-    # now we have all lists ready: eeg_data_list, fmri_data_list, label_list, things_img_idx_list, nsd_img_idx_list
-    assert len(eeg_data_list) == len(fmri_data_list) == len(label_list) == len(things_img_idx_list) == len(nsd_img_idx_list), "Mismatch in number of samples across data lists."
-    # we have to do the splitting
+    # Train / val / test splitting
+    # Make sure the same image does not appear in different splits
     training_indices = []
     val_indices = []
     test_indices = []
-    # NOTE: make sure we don't put same image in different splits
-    #       (A, 1010) and (A, 648) is not allowed
-    #       (A, 648) and (C, 648) is not allowed
-    #       note that there might be overlap in things_img_idx_list and nsd_img_idx_list
-    # Let's find these cases first
-    things_img_idx_to_pair_indices = {}
-    nsd_img_idx_to_pair_indices = {}
-    for idx, (things_idx, nsd_idx) in enumerate(zip(things_img_idx_list, nsd_img_idx_list)):
-        if things_idx not in things_img_idx_to_pair_indices:
-            things_img_idx_to_pair_indices[things_idx] = []
-        things_img_idx_to_pair_indices[things_idx].append(idx)
-        if nsd_idx not in nsd_img_idx_to_pair_indices:
-            nsd_img_idx_to_pair_indices[nsd_idx] = []
-        nsd_img_idx_to_pair_indices[nsd_idx].append(idx)
-    # Now we find the indices that have overlap
+
+    # Collect all image indices across all NSD subjects
+    things_img_idx_to_pair_indices: typing.Dict[int, typing.List[int]] = {}
+    all_nsd_img_idx_to_pair_indices: typing.Dict[int, typing.List[int]] = {}
+    for idx, things_idx in enumerate(things_img_idx_list):
+        things_img_idx_to_pair_indices.setdefault(things_idx, []).append(idx)
+    for ns in nsd_subject_tuple:
+        for idx, nsd_idx in enumerate(nsd_img_idx_lists[ns]):
+            all_nsd_img_idx_to_pair_indices.setdefault(nsd_idx, []).append(idx)
+
     overlap_indices = set()
     for indices in things_img_idx_to_pair_indices.values():
         if len(indices) > 1:
             overlap_indices.update(indices)
-    for indices in nsd_img_idx_to_pair_indices.values():
+    for indices in all_nsd_img_idx_to_pair_indices.values():
         if len(indices) > 1:
             overlap_indices.update(indices)
-    print(f"Found {len(overlap_indices)} overlapping pairs that share the same image index.")
-    # We put these to training set
+    print(f"\033[93mFound {len(overlap_indices)} overlapping pairs (assigned to train).\033[0m")
     training_indices.extend(overlap_indices)
-    # Now we get the list of remaining indices
-    remaining_indices = [idx for idx in range(len(label_list)) if idx not in overlap_indices]
-    # calculate corrected split ratios (since we assigned something)
-    # training should be smaller regarding remaining_indices
-    remaining_split_ratios = {
-        'train': (split_ratios['train'] * len(label_list) - len(overlap_indices)) / len(remaining_indices),
-        'val': split_ratios['val'] * len(label_list) / len(remaining_indices),
-        'test': split_ratios['test'] * len(label_list) / len(remaining_indices)
-    }
-    # Now we split the remaining indices
-    train_idx, temp_idx = train_test_split(remaining_indices, test_size = remaining_split_ratios['val'] + remaining_split_ratios['test'], random_state = split_seed)
-    val_idx, test_idx = train_test_split(temp_idx, test_size = remaining_split_ratios['test'] / (remaining_split_ratios['val'] + remaining_split_ratios['test']), random_state = split_seed)
-    training_indices.extend(train_idx)
-    val_indices.extend(val_idx)
-    test_indices.extend(test_idx)
-    print(f"Split data into {len(training_indices)} training samples, {len(val_indices)} validation samples, and {len(test_indices)} test samples.")
 
-    # We init lmdb
-    output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subject}_{TARGET_FREQ}Hz"
-    # append "_no_things_test" to output_dir name if we are using filtered test split to avoid confusion
-    if filter_things_test_split:
-        output_dir += "_no_things_test"
-    os.makedirs(output_dir, exist_ok = True)
-    # Remove output_dir if already exists to avoid confusion
+    remaining_indices = [idx for idx in range(len(label_list)) if idx not in overlap_indices]
+
+    if len(remaining_indices) == 0:
+        # All pairs overlap; put everything in train, nothing to split
+        print(f"\033[91mWarning: All pairs overlap. Assigning everything to training set.\033[0m")
+        val_indices = []
+        test_indices = []
+    else:
+        remaining_split_ratios = {
+            'train': max(0, (split_ratios['train'] * len(label_list) - len(overlap_indices)) / len(remaining_indices)),
+            'val': split_ratios['val'] * len(label_list) / len(remaining_indices),
+            'test': split_ratios['test'] * len(label_list) / len(remaining_indices)
+        }
+        val_test_size = remaining_split_ratios['val'] + remaining_split_ratios['test']
+        if val_test_size <= 0 or val_test_size >= 1.0:
+            # Cannot split meaningfully; put all remaining in train
+            training_indices.extend(remaining_indices)
+        else:
+            train_idx, temp_idx = train_test_split(remaining_indices,
+                                                   test_size = val_test_size,
+                                                   random_state = split_seed)
+            test_ratio = remaining_split_ratios['test'] / val_test_size
+            if test_ratio <= 0 or test_ratio >= 1.0:
+                val_indices.extend(temp_idx)
+            else:
+                val_idx, test_idx = train_test_split(temp_idx,
+                                                     test_size = test_ratio,
+                                                     random_state = split_seed)
+                training_indices.extend(train_idx)
+                val_indices.extend(val_idx)
+                test_indices.extend(test_idx)
+    print(f"\033[92mSplit: train = {len(training_indices)}, val = {len(val_indices)}, test = {len(test_indices)}\033[0m")
+
+    # Initialise LMDB
+    output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subjects_tag}{test_suffix}_{TARGET_FREQ}Hz"
     if os.path.exists(output_dir):
-        print(f"Output directory {output_dir} already exists. Removing it ...")
+        print(f"\033[93mOutput directory {output_dir} already exists. Removing it ...\033[0m")
         os.system(f"rm -rf {output_dir}")
-    print(f"Initializing LMDB database at {output_dir}...")
+    os.makedirs(output_dir, exist_ok = True)
+    print(f"\n >>> Initializing LMDB database at {output_dir} >>>")
     db = lmdb.open(output_dir, map_size = 53687091200)
-    # Save take mean / dataset mix mode / split ratio / split seed
-    # to lmdb as meta info for future reference
+
+    # Save metadata (including NSD subject info)
     meta_info = {
         'eeg_take_mean': eeg_take_mean,
         'fmri_take_mean': fmri_take_mean,
@@ -313,79 +336,114 @@ for (things_subject, nsd_subject), mindeye2_ckpt in zip(subjects, mindeye2_ckpts
         'split_ratios': split_ratios,
         'split_seed': split_seed,
         'exclude_THINGS_test_split': filter_things_test_split,
+        'things_subject': things_subject,
+        'nsd_subjects': list(nsd_subject_tuple),
     }
     txn = db.begin(write = True)
     txn.put(key = 'meta_info'.encode(), value = pickle.dumps(meta_info))
     txn.commit()
-    # We loop training / testing / validation indices
+
+    # Write samples to LMDB
     for split_name, indices in zip(['train', 'val', 'test'], [training_indices, val_indices, test_indices]):
-        print(f"Processing {split_name} split with {len(indices)} samples...")
+        print(f"\n >>> Processing {split_name} split with {len(indices)} samples >>>")
         for idx in tqdm(indices, desc = f"Processing {split_name} samples"):
-            # fetch data
-            eeg_data = eeg_data_list[idx]  # shape (num_trails, new_timepoints, 200 Hz)
-            fmri_data = fmri_data_list[idx]  # shape (num_trails, hidden_dim)
+            eeg_data = eeg_data_list[idx]  # (num_trials, channels, timepoints)
             label = label_list[idx]
             things_img_idx = things_img_idx_list[idx]
-            nsd_img_idx = nsd_img_idx_list[idx]
+
             # Perform mean processing if needed
             if eeg_take_mean:
-                eeg_data = np.mean(eeg_data, axis = 0, keepdims = True)  # shape (1, time_point, 200 Hz)
-            if fmri_take_mean:
-                fmri_data = np.mean(fmri_data, axis = 0, keepdims = True)  # shape (1, hidden_dim)
-            # perform dataset mixing
+                eeg_data = np.mean(eeg_data, axis = 0, keepdims = True)
+
+            # Build per-subject fMRI data and optionally apply mean
+            nsd_subject_fmri_list = []
+            for ns in nsd_subject_tuple:
+                fmri_data = per_subject_fmri[ns][idx]  # (num_trials, 4096)
+                nsd_img_idx = nsd_img_idx_lists[ns][idx]
+                if fmri_take_mean:
+                    fmri_data = np.mean(fmri_data, axis = 0, keepdims = True)
+                nsd_subject_fmri_list.append({
+                    'subject': ns,
+                    'fmri': fmri_data,  # (num_trials or 1, 4096)
+                    'nsd_img_idx': nsd_img_idx,
+                })
+
+            # Dataset mixing
             data_dictionaries = []
             if dataset_mix_mode == 'cross':
-                # For each EEG sample, we find all matching FMRI samples
+                # Cross product of EEG trials × first NSD subject's fMRI trials
+                first_fmri = nsd_subject_fmri_list[0]['fmri']
                 for eeg_idx in range(eeg_data.shape[0]):
-                    for fmri_idx in range(fmri_data.shape[0]):
-                        # we keep original shape
+                    for fmri_idx in range(first_fmri.shape[0]):
+                        # Build nsd_data list for this sample
+                        nsd_data = []
+                        for s_i, subj_entry in enumerate(nsd_subject_fmri_list):
+                            if s_i == 0:
+                                fmri_trial = subj_entry['fmri'][fmri_idx]
+                            else:
+                                # Cycle through this subject's available trials.
+                                # NOTE: if subjects have different trial counts, this wraps
+                                # around so every cross-product entry gets a valid trial.
+                                fmri_trial = subj_entry['fmri'][fmri_idx % subj_entry['fmri'].shape[0]]
+                            nsd_data.append({
+                                'subject': subj_entry['subject'],
+                                'fmri': fmri_trial[np.newaxis, :],  # (1, 4096)
+                                'nsd_img_idx': subj_entry['nsd_img_idx'],
+                            })
                         data_dict = {
-                            'eeg': eeg_data[eeg_idx][ np.newaxis, : ],     # shape (1, time_point, 200 Hz)
-                            'fmri': fmri_data[fmri_idx][ np.newaxis, : ],  # shape (1, hidden_dim)
+                            'eeg': eeg_data[eeg_idx][np.newaxis, :],  # (1, channels, timepoints)
+                            'nsd_data': nsd_data,
                             'label': label,
                             'things_img_idx': things_img_idx,
-                            'nsd_img_idx': nsd_img_idx
                         }
                         data_dictionaries.append(data_dict)
             else:
-                # If not cross, just use the original data
-                # Place-holder for now
+                # No cross-product, store all trials
+                nsd_data = []
+                for subj_entry in nsd_subject_fmri_list:
+                    nsd_data.append({
+                        'subject': subj_entry['subject'],
+                        'fmri': subj_entry['fmri'],
+                        'nsd_img_idx': subj_entry['nsd_img_idx'],
+                    })
                 data_dict = {
-                    'eeg': eeg_data,   # shape (num_trails, time_point, 200 Hz)
-                    'fmri': fmri_data, # shape (num_trails, hidden_dim)
+                    'eeg': eeg_data,
+                    'nsd_data': nsd_data,
                     'label': label,
                     'things_img_idx': things_img_idx,
-                    'nsd_img_idx': nsd_img_idx
                 }
                 data_dictionaries.append(data_dict)
+
             # Save each mixed sample to LMDB
             for i, data_dict in enumerate(data_dictionaries):
                 sample_key = f"{split_name}_{idx:05d}_{i:05d}"
                 txn = db.begin(write = True)
                 txn.put(key = sample_key.encode(), value = pickle.dumps(data_dict))
                 txn.commit()
-    # After we processed all samples, we close the database
-    db.close()
-    print(f"Finished processing subject pair: Things {things_subject} and NSD {nsd_subject}. Dataset saved at {output_dir}.")
 
-    # Sanity check:
+    db.close()
+    print(f"\nFinished processing. Dataset saved at {output_dir}.")
+
+    # Sanity check
     print(f"\nSanity check for the created LMDB dataset at {output_dir}...")
-    db = lmdb.open(output_dir, 
-                   readonly = True, 
-                   lock = False, 
-                   readahead = True, 
-                   meminit = False)
+    db = lmdb.open(output_dir, readonly = True, lock = False, readahead = True, meminit = False)
     with db.begin(write = False) as txn:
         keys = [key.decode() for key, _ in txn.cursor()]
     print(f"Total samples in LMDB: {len(keys) - 1} (excluding meta_info). Sample keys: {keys[:5]}...")
     # We count the number of samples in each split
     split_counts = {'train': 0, 'val': 0, 'test': 0}
     for key in keys:
-        if key.startswith('train_'):
-            split_counts['train'] += 1
-        elif key.startswith('val_'):
-            split_counts['val'] += 1
-        elif key.startswith('test_'):
-            split_counts['test'] += 1
+        for s in split_counts:
+            if key.startswith(s + '_'):
+                split_counts[s] += 1
     print(f"Sample counts by split: {split_counts}")
+    # Verify a sample structure
+    with db.begin(write = False) as txn:
+        sample_key = [k for k in keys if k.startswith('train_')][0]
+        sample = pickle.loads(txn.get(sample_key.encode()))
+        print(f"Sample structure keys: {list(sample.keys())}")
+        print(f"  EEG shape: {sample['eeg'].shape}")
+        print(f"  nsd_data: {len(sample['nsd_data'])} subject(s)")
+        for nd in sample['nsd_data']:
+            print(f"    subject = {nd['subject']}, fmri shape = {nd['fmri'].shape}, nsd_img_idx = {nd['nsd_img_idx']}")
     db.close()
