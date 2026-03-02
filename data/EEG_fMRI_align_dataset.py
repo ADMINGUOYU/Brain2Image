@@ -2,10 +2,10 @@
 # Please run 'preprocess/process_EEG_fMRI_align.py' to generate the dataset before using this code
 # It yields:
 #     'eeg': list of EEG data (batch_size, num_channels, num_timepoints)
-#     'fmri': list of fMRI data (batch_size, embedding_dim)
+#     'nsd_data': list of dicts (one per NSD subject), each with:
+#         'subject': str, 'fmri': (batch_size, 4096), 'nsd_img_idx': (batch_size,)
 #     'label': list of labels (image clustered category) (batch_size,)
 #     'things_img_idx': list of image indices corresponding to each sample (batch_size,)
-#     'nsd_img_idx': list of image indices corresponding to each sample (batch_size,)
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -20,6 +20,10 @@ class EEG_fMRI_Align_Dataset(Dataset):
 
     """
     EEG_fMRI_Align_Dataset
+
+    NOTE: Supports both old LMDB format (flat 'fmri' + 'nsd_img_idx' keys)
+    and new multi-subject format ('nsd_data' list of dicts).
+    Always returns data in the new list-of-dicts format.
     """
 
     def __init__(self, 
@@ -48,7 +52,7 @@ class EEG_fMRI_Align_Dataset(Dataset):
     def __len__(self) -> int:
         return len(self.keys)
 
-    def __getitem__(self, idx) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def __getitem__(self, idx) -> typing.Tuple[np.ndarray, typing.List[dict], int, int]:
 
         # Retrieve data from LMDB
         key = self.keys[idx]
@@ -68,36 +72,73 @@ class EEG_fMRI_Align_Dataset(Dataset):
             data: dict = pickle.loads(txn.get(key.encode()))
         
         # Extract data
-        EEG = data['eeg']  # EEG: (1, 63, 200 / 250) 
-        fMRI = data['fmri']  # fMRI: (1, 4096,)
+        EEG = data['eeg']  # EEG: (1, 63, 200 / 250)
         label = data['label']
         things_img_idx = data['things_img_idx']
-        nsd_img_idx = data['nsd_img_idx']
+
+        # Handle both old and new LMDB formats
+        if 'nsd_data' in data:
+            # New multi-subject format
+            nsd_data = data['nsd_data']  # list of dicts
+        else:
+            # Old single-subject format: convert to list-of-dicts
+            nsd_data = [{
+                'subject': 'legacy_single_subject',
+                'fmri': data['fmri'],        # (1, 4096)
+                'nsd_img_idx': data['nsd_img_idx'],
+            }]
 
         # Assert shape
         assert EEG.shape == (1, 63, 200) or EEG.shape == (1, 63, 250), f"Expected EEG shape (1, 63, 200) or (1, 63, 250), but got {EEG.shape}"
-        assert fMRI.shape == (1, 4096), f"Expected fMRI shape (1, 4096), but got {fMRI.shape}"
+        # NOTE: remove this assertion if you believe this
+        #       consumes too much time
+        for nd in nsd_data:
+            assert nd['fmri'].shape == (1, 4096), f"Expected fMRI shape (1, 4096), but got {nd['fmri'].shape}"
 
         # Normalize EEG
         EEG = EEG / 100
 
         # Optionally normalize fMRI to unit norm
         if self.normalize_fmri:
-            fMRI_norm = np.linalg.norm(fMRI)
-            if fMRI_norm > 0:
-                fMRI = fMRI / fMRI_norm
+            for nd in nsd_data:
+                fMRI_norm = np.linalg.norm(nd['fmri'])
+                if fMRI_norm > 0:
+                    nd['fmri'] = nd['fmri'] / fMRI_norm
 
-        return EEG, fMRI, label, things_img_idx, nsd_img_idx
+        return EEG, nsd_data, label, things_img_idx
     
-    def collate(self, batch) -> typing.Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def collate(self, batch: typing.List[typing.Tuple[np.ndarray, typing.List[dict], int, int]])\
+         -> typing.Tuple[torch.Tensor, typing.List[dict], torch.Tensor, torch.Tensor]:
+        
         EEG = np.array([x[0] for x in batch]).squeeze()
-        fMRI = np.array([x[1] for x in batch]).squeeze()
         label = np.array([x[2] for x in batch])
         things_img_idx = np.array([x[3] for x in batch])
-        nsd_img_idx = np.array([x[4] for x in batch])
         # Make EEG in shape (batch_size, num_channels, 1, num_timepoints)
         EEG = EEG.reshape(EEG.shape[0], EEG.shape[1], 1, EEG.shape[2])
-        return torch.from_numpy(EEG).float(), torch.from_numpy(fMRI).float(), torch.from_numpy(label).long(), torch.from_numpy(things_img_idx).long(), torch.from_numpy(nsd_img_idx).long()
+
+        # Collate nsd_data: list of dicts -> list of batched dicts
+        # nsd_data_list[i] = {'subject': str, 'fmri': (batch_size, 4096), 'nsd_img_idx': (batch_size,)}
+        num_subjects = len(batch[0][1])
+        # NOTE: remove this assertion if you believe this
+        #       consumes too much time
+        assert all(len(x[1]) == num_subjects for x in batch), \
+            "All samples in batch must have the same number of NSD subjects"
+        nsd_data_list = []
+        for s_i in range(num_subjects):
+            fmri_arr = np.array([x[1][s_i]['fmri'] for x in batch]).squeeze()
+            nsd_img_idx_arr = np.array([x[1][s_i]['nsd_img_idx'] for x in batch])
+            nsd_data_list.append({
+                'subject': batch[0][1][s_i]['subject'],
+                'fmri': torch.from_numpy(fmri_arr).float(),
+                'nsd_img_idx': torch.from_numpy(nsd_img_idx_arr).long(),
+            })
+
+        return (
+            torch.from_numpy(EEG).float(),
+            nsd_data_list,
+            torch.from_numpy(label).long(),
+            torch.from_numpy(things_img_idx).long(),
+        )
 
 # helper function to get data loaders
 def get_data_loader(datasets_dir: str, 
@@ -141,15 +182,16 @@ def get_data_loader(datasets_dir: str,
 # Test code
 if __name__ == "__main__":
     # Example usage
-    datasets_dir = 'datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01'  # Update with actual path
+    datasets_dir = 'datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_sub-02_sub-05_sub-07_no_things_test_250Hz'
     batch_size = 16
     data_loader = get_data_loader(datasets_dir, batch_size)
 
     # Iterate through one batch of training data
-    for EEG_batch, fMRI_batch, label_batch, things_img_idx_batch, nsd_img_idx_batch in data_loader['train']:
-        print(f"EEG batch shape: {EEG_batch.shape}")  # Expected: (batch_size, 63, 200 / 250)
-        print(f"fMRI batch shape: {fMRI_batch.shape}")  # Expected: (batch_size, 4096)
+    for EEG_batch, nsd_data_list, label_batch, things_img_idx_batch in data_loader['train']:
+        print(f"EEG batch shape: {EEG_batch.shape}")  # Expected: (batch_size, 63, 1, 200 / 250)
+        print(f"Number of NSD subjects: {len(nsd_data_list)}")
+        for i, nd in enumerate(nsd_data_list):
+            print(f"  NSD subject {i}: {nd['subject']}, fMRI shape: {nd['fmri'].shape}, nsd_img_idx shape: {nd['nsd_img_idx'].shape}")
         print(f"label batch shape: {label_batch.shape}")
         print(f"things_img_idx batch shape: {things_img_idx_batch.shape}")
-        print(f"nsd_img_idx batch shape: {nsd_img_idx_batch.shape}")
         break
