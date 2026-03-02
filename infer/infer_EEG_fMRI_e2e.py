@@ -327,14 +327,15 @@ def run_inference(
             if args.max_batches is not None and batch_idx >= args.max_batches:
                 break
 
-            (EEG, fMRI, label,
-             things_img_idx, nsd_img_idx,
+            (EEG, nsd_data_list, label,
+             things_img_idx,
              _, _,
              things_image_data, nsd_image_data,
              clip_target, vae_latents, cnx_features, _) = batch
 
             EEG = EEG.to(device)
-            fMRI = fMRI.to(device)
+            for nd in nsd_data_list:
+                nd['fmri'] = nd['fmri'].to(device)
 
             # Stage 1: EEG encoder → 4096-dim embeddings
             with torch.amp.autocast(device.type):
@@ -401,7 +402,7 @@ def run_inference(
 
             # Accumulate embeddings (cpu to save GPU memory)
             all_eeg_embeds.append(eeg_embeds.cpu())
-            all_fmri.append(fMRI.cpu())
+            all_fmri.append(nsd_data_list[0]['fmri'].cpu())
 
     return (
         torch.cat(all_eeg_embeds, dim=0),

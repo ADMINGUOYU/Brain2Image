@@ -9,20 +9,19 @@
 # NOTE: pkl data is loaded once in get_generation_data_loader() and shared
 #       across all splits via _shared_data to avoid 3× memory duplication.
 #
-# Yields:
-#   'eeg':                   (batch_size, 63, 1, 200 / 250)
-#   'fmri':                  (batch_size, 4096)
-#   'label':                 (batch_size,)
-#   'things_img_idx':        (batch_size,)
-#   'nsd_img_idx':           (batch_size,)
-#   'things_clip_target':    (batch_size, clip_embed_dim)
-#   'nsd_clip_target':       (batch_size, clip_embed_dim)
-#   'things_image':          (batch_size, 3, 224, 224)
-#   'nsd_image':             (batch_size, 3, 224, 224)
-#   'clip_target_bigG':      (batch_size, 256, 1664)   — pre-computed ViT-bigG/14 patch tokens
-#   'vae_latents':           (batch_size, 4, 28, 28)   — pre-computed SD VAE latents
-#   'cnx_features':          (batch_size, 49, 512)     — pre-computed ConvNeXt features
-#   'cnx_blurry_features':       (batch_size, 3, 224, 224) — pre-computed blurry augmentation (for blurry reconstruction target)
+# Yields (12-tuple):
+#   [0]  EEG                (batch_size, 63, 1, 200 / 250)
+#   [1]  nsd_data_list      list of dicts {subject, fmri:(B,4096), nsd_img_idx:(B,)}
+#   [2]  label              (batch_size,)
+#   [3]  things_img_idx     (batch_size,)
+#   [4]  things_clip_embed  (batch_size, 768)
+#   [5]  nsd_clip_embed     (batch_size, 768)
+#   [6]  things_image_data  (batch_size, 3, 224, 224)
+#   [7]  nsd_image_data     (batch_size, 3, 224, 224)
+#   [8]  clip_target_bigG   (batch_size, 256, 1664)   — pre-computed ViT-bigG/14 patch tokens
+#   [9]  vae_latents        (batch_size, 4, 28, 28)   — pre-computed SD VAE latents
+#   [10] cnx_features       (batch_size, 49, 512)     — pre-computed ConvNeXt features
+#   [11] cnx_blurry_features (batch_size, 49, 512)    — pre-computed ConvNeXt features for blurry recon
 
 
 # --------------- Start of configuration --------------- #
@@ -164,29 +163,43 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         with self.db.begin(write = False) as txn:
             data: dict = pickle.loads(txn.get(key.encode()))
 
-        # Extract EEG, fMRI, label, and image indices
+        # Extract EEG, label, and image indices
         EEG = data["eeg"]  # (1, 63, 200 / 250)
-        fMRI = data["fmri"]  # (1, 4096)
         label = data["label"]
         things_img_idx = data["things_img_idx"]
-        nsd_img_idx = data["nsd_img_idx"]
+
+        # Handle both old and new LMDB formats
+        if 'nsd_data' in data:
+            # New multi-subject format
+            nsd_data = data['nsd_data']  # list of dicts
+        else:
+            # Old single-subject format: convert to list-of-dicts
+            nsd_data = [{
+                'subject': 'legacy_single_subject',
+                'fmri': data['fmri'],        # (1, 4096)
+                'nsd_img_idx': data['nsd_img_idx'],
+            }]
+
+        # Use first subject's nsd_img_idx for image/embedding lookups
+        nsd_img_idx = nsd_data[0]['nsd_img_idx']
 
         # some assertions to make sure the data shapes are correct
-        # REMOVE if causing issues, but good for debugging
         assert EEG.shape == (1, 63, 200) or EEG.shape == (1, 63, 250),\
             f"Unexpected EEG shape: {EEG.shape} for key {key}"
-        assert fMRI.shape == (1, 4096), \
-            f"Unexpected fMRI shape: {fMRI.shape} for key {key}"
+        for nd in nsd_data:
+            assert nd['fmri'].shape == (1, 4096), \
+                f"Unexpected fMRI shape: {nd['fmri'].shape} for key {key}"
 
         # Normalize EEG
         # TODO: review this
         EEG = EEG / 100
 
-        # Optionally normalize fMRI
+        # Optionally normalize fMRI (per-subject)
         if self.normalize_fmri:
-            fMRI_norm = np.linalg.norm(fMRI)
-            if fMRI_norm > 0:
-                fMRI = fMRI / fMRI_norm
+            for nd in nsd_data:
+                fMRI_norm = np.linalg.norm(nd['fmri'])
+                if fMRI_norm > 0:
+                    nd['fmri'] = nd['fmri'] / fMRI_norm
 
         # Get CLIP embedding from images DataFrame
         # NOTE: we return zero vectors if image/CLIP data is not available
@@ -261,8 +274,8 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                 cnx_blurry_features = row["cnx_blurry_features"].astype(np.float32)
 
         # return everything
-        return EEG, fMRI, label, \
-               things_img_idx, nsd_img_idx, \
+        return EEG, nsd_data, label, \
+               things_img_idx, \
                things_clip_embed, nsd_clip_embed, \
                things_image_data, nsd_image_data, \
                clip_target_bigG, vae_latents, cnx_features, cnx_blurry_features
@@ -271,27 +284,38 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
         -> typing.Tuple[torch.Tensor, ...]:
 
         EEG = np.array([x[0] for x in batch]).squeeze()
-        fMRI = np.array([x[1] for x in batch]).squeeze()
         label = np.array([x[2] for x in batch])
         things_img_idx = np.array([x[3] for x in batch])
-        nsd_img_idx = np.array([x[4] for x in batch])
-        things_clip_embed = np.array([x[5] for x in batch])
-        nsd_clip_embed = np.array([x[6] for x in batch])
-        things_image_data = np.array([x[7] for x in batch])
-        nsd_image_data = np.array([x[8] for x in batch])
-        clip_target_bigG = np.array([x[9] for x in batch])
-        vae_latents = np.array([x[10] for x in batch])
-        cnx_features = np.array([x[11] for x in batch])
-        cnx_blurry_features = np.array([x[12] for x in batch])
+        things_clip_embed = np.array([x[4] for x in batch])
+        nsd_clip_embed = np.array([x[5] for x in batch])
+        things_image_data = np.array([x[6] for x in batch])
+        nsd_image_data = np.array([x[7] for x in batch])
+        clip_target_bigG = np.array([x[8] for x in batch])
+        vae_latents = np.array([x[9] for x in batch])
+        cnx_features = np.array([x[10] for x in batch])
+        cnx_blurry_features = np.array([x[11] for x in batch])
         # Reshape EEG to (B, C, 1, T)
         EEG = EEG.reshape(EEG.shape[0], EEG.shape[1], 1, EEG.shape[2])
 
+        # Collate nsd_data: list of dicts -> list of batched dicts
+        num_subjects = len(batch[0][1])
+        assert all(len(x[1]) == num_subjects for x in batch), \
+            "All samples in batch must have the same number of NSD subjects"
+        nsd_data_list = []
+        for s_i in range(num_subjects):
+            fmri_arr = np.array([x[1][s_i]['fmri'] for x in batch]).squeeze()
+            nsd_img_idx_arr = np.array([x[1][s_i]['nsd_img_idx'] for x in batch])
+            nsd_data_list.append({
+                'subject': batch[0][1][s_i]['subject'],
+                'fmri': torch.from_numpy(fmri_arr).float(),
+                'nsd_img_idx': torch.from_numpy(nsd_img_idx_arr).long(),
+            })
+
         return (
             torch.from_numpy(EEG).float(),
-            torch.from_numpy(fMRI).float(),
+            nsd_data_list,
             torch.from_numpy(label).long(),
             torch.from_numpy(things_img_idx).long(),
-            torch.from_numpy(nsd_img_idx).long(),
             torch.from_numpy(things_clip_embed).float(),
             torch.from_numpy(nsd_clip_embed).float(),
             torch.from_numpy(things_image_data).float(),
@@ -460,10 +484,9 @@ if __name__ == "__main__":
 
     for (
         EEG_batch,
-        fMRI_batch,
+        nsd_data_list,
         label_batch,
         things_idx,
-        nsd_idx,
         things_clip_batch,
         nsd_clip_batch,
         things_image_batch,
@@ -474,10 +497,11 @@ if __name__ == "__main__":
         cnx_blurry_features_batch
     ) in data_loader["train"]:
         print(f"EEG batch shape: {EEG_batch.shape}")
-        print(f"fMRI batch shape: {fMRI_batch.shape}")
+        print(f"Number of NSD subjects: {len(nsd_data_list)}")
+        for i, nd in enumerate(nsd_data_list):
+            print(f"  NSD subject {i} ({nd['subject']}): fmri={nd['fmri'].shape}, nsd_img_idx={nd['nsd_img_idx'].shape}")
         print(f"Label batch shape: {label_batch.shape}")
         print(f"THINGS image indices (first 5): {things_idx[ : 5]}")
-        print(f"NSD image indices (first 5): {nsd_idx[ : 5]}")
         print(f"THINGS CLIP batch shape: {things_clip_batch.shape}")
         print(f"NSD CLIP batch shape: {nsd_clip_batch.shape}")
         print(f"THINGS image batch shape: {things_image_batch.shape}")

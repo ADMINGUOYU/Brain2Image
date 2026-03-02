@@ -155,7 +155,7 @@ class EEG_fMRI_E2E(nn.Module):
     def calc_e2e_loss(
         self,
         eeg_embeds: torch.Tensor,
-        fmri: torch.Tensor,
+        nsd_data_list: typing.List[dict],
         label: torch.Tensor,
         gen_outputs: typing.Dict[str, torch.Tensor],
         clip_target: torch.Tensor,
@@ -172,7 +172,7 @@ class EEG_fMRI_E2E(nn.Module):
         Compute all E2E losses.
         Args:
             eeg_embeds:   (B, 4096) — the ORIGINAL (unmixed) embeddings for alignment loss
-            fmri:         (B, 4096) — fMRI targets
+            nsd_data_list: list of dicts {subject, fmri:(B,4096), nsd_img_idx:(B,)}
             label:        (B,) — cluster labels
             gen_outputs:  dict from forward_generation (using mixed embeddings)
             clip_target:  (B, 256, 1664) — pre-computed ViT-bigG patch tokens
@@ -184,9 +184,23 @@ class EEG_fMRI_E2E(nn.Module):
         Returns:
             dict of losses: total, align, prior, clip, blur, mse, infonce, proto
         """
-        # 1. Alignment loss (on original unmixed embeddings)
-        align_total, mse_loss, infonce_loss, proto_loss = \
-            self.align_model.calc_alignment_loss(eeg_embeds, fmri, label)
+        # 1. Alignment loss — average over all NSD subjects
+        align_totals = []
+        mse_losses = []
+        infonce_losses = []
+        proto_losses = []
+        for nd in nsd_data_list:
+            at, ml, il, pl = self.align_model.calc_alignment_loss(
+                eeg_embeds, nd['fmri'], label
+            )
+            align_totals.append(at)
+            mse_losses.append(ml)
+            infonce_losses.append(il)
+            proto_losses.append(pl)
+        align_total = torch.stack(align_totals).mean()
+        mse_loss = torch.stack(mse_losses).mean()
+        infonce_loss = torch.stack(infonce_losses).mean()
+        proto_loss = torch.stack(proto_losses).mean()
 
         # 2. Diffusion prior loss
         backbone = gen_outputs['backbone']  # (B, 256, 1664)
@@ -331,14 +345,17 @@ if __name__ == "__main__":
     print("Blurry features shape:", gen_out['blurry_features'].shape)  # (4, 49, 512)
 
     # Loss computation
-    dummy_fmri = torch.randn(batch_size, 4096)
+    dummy_nsd_data_list = [
+        {'subject': 'sub-01', 'fmri': torch.randn(batch_size, 4096),
+         'nsd_img_idx': torch.randint(0, 100, (batch_size,))},
+    ]
     dummy_label = torch.randint(0, 5, (batch_size,))
     dummy_clip_target = torch.randn(batch_size, 256, 1664)
     dummy_vae = torch.randn(batch_size, 4, 28, 28)
     dummy_cnx = torch.randn(batch_size, 49, 512)
 
     losses = model.calc_e2e_loss(
-        eeg_embeds, dummy_fmri, dummy_label, gen_out,
+        eeg_embeds, dummy_nsd_data_list, dummy_label, gen_out,
         dummy_clip_target, dummy_vae, dummy_cnx,
         epoch=0, num_epochs=100,
     )

@@ -11,8 +11,8 @@ export HUGGINGFACE_HUB_CACHE="datasets/transformers_cache"
 export TRANSFORMERS_CACHE="datasets/transformers_cache"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-EXPERIMENT_DIR="runs/EEG_fMRI_e2e_1771940569_BRAIN2IMAGE-E2E-ATMS-batchsize-24_NO_blur"
-MODEL_DIR="${EXPERIMENT_DIR}/checkpoints/best_model_epoch_1.pth"
+EXPERIMENT_DIR="runs/Mar01_E2E/unfreeze_ME2_with_align"
+MODEL_DIR="${EXPERIMENT_DIR}/checkpoints/model_epoch_150.pth"
 OUTPUT_DIR="${EXPERIMENT_DIR}/inference"
 
 UNCLIP_CKPT="datasets/processed/mindeye2/unclip6_epoch0_step110000.ckpt"
@@ -23,7 +23,7 @@ AUTOENC_CKPT="datasets/processed/mindeye2/sd_image_var_autoenc.pth"
 SPLIT="test"
 PRIOR_TIMESTEPS=20
 NUM_SAMPLES=1         # num of figure reconstructions to save per sample 
-SAVE_BLURRY="false"   # model was trained without blurry recon (NO_blur run)
+SAVE_BLURRY="true"    # model was trained without blurry recon (NO_blur run)
 MAX_BATCHES="10"        # leave empty to run the full split
 
 # ── Hardware ──────────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ NUM_WORKERS=16
 
 # ── Backbone — ATMS (must match the training run) ─────────────────────────────
 EEG_ENCODER_TYPE="ATMS"
-DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_250Hz"
+DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_250Hz_no_things_test-1500"
 IMAGES_DF_DIR="datasets/processed"
 NORMALIZE_FMRI="true"
 EMB_SOURCE="things"
@@ -60,7 +60,7 @@ NUM_ATTENTION_HEADS=4
 # ── Alignment / loss params (used only for model construction) ────────────────
 MSE_SCALE=1.0
 INFONCE_SCALE=0.2
-PROTO_DISTILL_SCALE=0.0
+PROTO_DISTILL_SCALE=1.0
 TEMPERATURE=0.1
 
 # ── Validation ────────────────────────────────────────────────────────────────

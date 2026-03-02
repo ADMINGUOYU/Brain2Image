@@ -47,6 +47,9 @@ from scipy import signal
 
 # --------------- Start of configuration --------------- #
 
+# whether to use mirror link for downloading ckpt (in case of slow download from Hugging Face)
+MIRROR = True
+
 # Paths to necessary files
 processed_dir = "datasets/processed"
 
@@ -103,6 +106,8 @@ preserve_full_ckpt = True
 def download_ckpt(subject_number: int):
     # construct URL (make sure subject number in TWO digit)
     ckpt_url = f"https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/train_logs/final_subj{subject_number:02d}_pretrained_40sess_24bs/last.pth?download=true"
+    if MIRROR:
+        ckpt_url = f"https://hf-mirror.com/datasets/pscotti/mindeyev2/resolve/main/train_logs/final_subj{subject_number:02d}_pretrained_40sess_24bs/last.pth?download=true"
     ckpt_path = processed_dir + f"/mindeye2/sub-{subject_number:02d}_last.pth"
     if not os.path.exists(ckpt_path):
         print(f"Downloading MindEYE2 checkpoint for subject {subject_number}...")

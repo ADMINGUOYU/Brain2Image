@@ -16,7 +16,12 @@
       "Bash(python3:*)",
       "Bash(find:*)",
       "Bash(grep -r \"unclip6_epoch0_step110000\\\\|sd_image_var_autoenc\\\\|bigG_to_L\" /mnt/afs/250010218/Brain2Image --include=\"*.py\" --include=\"*.sh\" --include=\"*.ipynb\" 2>/dev/null | head -20)",
-      "Bash(find /mnt/afs/250010218/Brain2Image -name \"unclip*.ckpt\" -o -name \"unclip*.pth\" 2>/dev/null | head -5\nfind /mnt/afs/250010218/Brain2Image -name \"sd_image_var_autoenc*\" 2>/dev/null | head -5)"
+      "Bash(find /mnt/afs/250010218/Brain2Image -name \"unclip*.ckpt\" -o -name \"unclip*.pth\" 2>/dev/null | head -5\nfind /mnt/afs/250010218/Brain2Image -name \"sd_image_var_autoenc*\" 2>/dev/null | head -5)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('data/EEG_fMRI_generation_e2e_dataset.py', doraise=True\\); print\\('dataset OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('model/EEG_fMRI_e2e.py', doraise=True\\); print\\('model OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('train/train_EEG_fMRI_e2e.py', doraise=True\\); print\\('train OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('infer/infer_EEG_fMRI_e2e.py', doraise=True\\); print\\('infer OK'\\)\")",
+      "Bash(python -m model.EEG_fMRI_e2e 2>&1)"
     ]
   }
 }

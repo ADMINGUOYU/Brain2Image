@@ -50,7 +50,7 @@ processed_data_dir = 'datasets/processed'
 os.makedirs(processed_data_dir, exist_ok = True)
 
 # we specify the subjects we want to process
-subject_wanted = ['sub-01'] # 8 in total (actually 4 -> sub-01, sub-02, sub-05, sub-07)
+subject_wanted = ['sub-07'] # 8 in total (actually 4 -> sub-01, sub-02, sub-05, sub-07)
 
 # CUDA device configuration
 CUDA = 0
