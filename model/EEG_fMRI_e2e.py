@@ -74,6 +74,17 @@ class EEG_fMRI_E2E(nn.Module):
             clip_scale=clip_scale,
         )
 
+        # ── Multi-subject fMRI averaging strategy ──
+        self.fmri_average_mode = gen_cfg.get('fmri_average_mode', 'loss')
+        self.subject_loss_weights = gen_cfg.get('subject_loss_weights', None)
+
+        # Validate fmri_average_mode
+        if self.fmri_average_mode not in ['embedding', 'loss']:
+            raise ValueError(f"fmri_average_mode must be 'embedding' or 'loss', got {self.fmri_average_mode}")
+
+        # subject_loss_weights is expected to be either None or a pre-validated dict
+        # No parsing or validation needed here - handled by training script
+
         # ── 3. Diffusion Prior ──
         out_dim = clip_size
         depth = 6
@@ -184,23 +195,50 @@ class EEG_fMRI_E2E(nn.Module):
         Returns:
             dict of losses: total, align, prior, clip, blur, mse, infonce, proto
         """
-        # 1. Alignment loss — average over all NSD subjects
-        align_totals = []
-        mse_losses = []
-        infonce_losses = []
-        proto_losses = []
-        for nd in nsd_data_list:
-            at, ml, il, pl = self.align_model.calc_alignment_loss(
-                eeg_embeds, nd['fmri'], label
-            )
-            align_totals.append(at)
-            mse_losses.append(ml)
-            infonce_losses.append(il)
-            proto_losses.append(pl)
-        align_total = torch.stack(align_totals).mean()
-        mse_loss = torch.stack(mse_losses).mean()
-        infonce_loss = torch.stack(infonce_losses).mean()
-        proto_loss = torch.stack(proto_losses).mean()
+        # 1. Multi-subject fMRI alignment loss computation
+        if self.fmri_average_mode == "embedding":
+            # Embedding-level averaging: average fMRI first, then compute loss once
+            fmri_avg = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim=0)
+            align_total, mse_loss, infonce_loss, proto_loss = \
+                self.align_model.calc_alignment_loss(eeg_embeds, fmri_avg, label)
+
+        elif self.fmri_average_mode == "loss":
+            # Loss-level averaging: compute loss per subject, then average
+            align_totals = []
+            mse_losses = []
+            infonce_losses = []
+            proto_losses = []
+
+            for nd in nsd_data_list:
+                at, ml, il, pl = self.align_model.calc_alignment_loss(
+                    eeg_embeds, nd['fmri'], label
+                )
+
+                # Apply per-subject weight if specified
+                if self.subject_loss_weights is not None:
+                    subject_id = nd.get('subject', f'sub-{len(align_totals):02d}')
+                    weight = self.subject_loss_weights.get(subject_id, 1.0 / len(nsd_data_list))
+                    at = at * weight
+                    ml = ml * weight
+                    il = il * weight
+                    pl = pl * weight
+
+                align_totals.append(at)
+                mse_losses.append(ml)
+                infonce_losses.append(il)
+                proto_losses.append(pl)
+
+            # Sum (not mean) if using weights, otherwise mean
+            if self.subject_loss_weights is not None:
+                align_total = torch.stack(align_totals).sum()
+                mse_loss = torch.stack(mse_losses).sum()
+                infonce_loss = torch.stack(infonce_losses).sum()
+                proto_loss = torch.stack(proto_losses).sum()
+            else:
+                align_total = torch.stack(align_totals).mean()
+                mse_loss = torch.stack(mse_losses).mean()
+                infonce_loss = torch.stack(infonce_losses).mean()
+                proto_loss = torch.stack(proto_losses).mean()
 
         # 2. Diffusion prior loss
         backbone = gen_outputs['backbone']  # (B, 256, 1664)
@@ -273,6 +311,8 @@ class EEG_fMRI_E2E(nn.Module):
             'blurry_recon': self.blurry_recon,
             'clip_size': self.clip_size,
             'EEG_Encoder_type': type(self.align_model.eeg_encoder).__name__,
+            'fmri_average_mode': self.fmri_average_mode,
+            'subject_loss_weights': self.subject_loss_weights,
         }
 
         torch.save({
@@ -297,6 +337,10 @@ class EEG_fMRI_E2E(nn.Module):
         self.prior_scale = loaded['parameters']['prior_scale']
         self.clip_loss_scale = loaded['parameters']['clip_loss_scale']
         self.blur_scale = loaded['parameters']['blur_scale']
+
+        # Load multi-subject averaging strategy (with backward compatibility)
+        self.fmri_average_mode = loaded['parameters'].get('fmri_average_mode', 'loss')
+        self.subject_loss_weights = loaded['parameters'].get('subject_loss_weights', None)
 
     def load_alignment_checkpoint(self, path: str, device: torch.device):
         """Load a pretrained alignment model checkpoint into self.align_model."""

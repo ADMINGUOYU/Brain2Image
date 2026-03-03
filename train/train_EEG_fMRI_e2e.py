@@ -23,6 +23,34 @@ import os
 import shutil
 
 
+def parse_and_validate_subject_weights(weight_str):
+    """
+    Parse subject weight string and validate that weights sum to 1.0.
+
+    Args:
+        weight_str: String in format "sub-01:0.4,sub-02:0.2,..." or None
+
+    Returns:
+        Dict mapping subject IDs to weights, or None if weight_str is None
+
+    Raises:
+        ValueError: If weights don't sum to 1.0
+    """
+    if weight_str is None:
+        return None
+
+    weights = {}
+    for pair in weight_str.split(','):
+        subject, weight = pair.strip().split(':')
+        weights[subject.strip()] = float(weight.strip())
+
+    total = sum(weights.values())
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(f"Subject weights must sum to 1.0, got {total}")
+
+    return weights
+
+
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train EEG-fMRI E2E generation model")
 
@@ -80,6 +108,13 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--blur_scale", type=float, default=0.5)
     parser.add_argument("--mixup_pct", type=float, default=0.33)
     parser.add_argument("--blurry_recon", type=lambda x: x.lower() == 'true', default=True)
+
+    # Multi-subject fMRI averaging strategy
+    parser.add_argument("--fmri_average_mode", type=str, default="loss",
+                        choices=["embedding", "loss"],
+                        help='Where to average multi-subject fMRI: "embedding" (before loss) or "loss" (after loss)')
+    parser.add_argument("--subject_loss_weights", type=str, default=None,
+                        help='Per-subject loss weights (format: "sub-01:0.4,sub-02:0.2,..."). Only used when fmri_average_mode="loss"')
 
     # MindEye2 checkpoint for generation modules
     parser.add_argument('--mindeye2_ckpt_path', type=str, default=None, help='Path to MindEYE2 checkpoint for loading generation module weights')
@@ -350,6 +385,9 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unsupported backbone type: {args.backbone}")
 
+    # Parse and validate subject weights (front-load validation)
+    subject_loss_weights = parse_and_validate_subject_weights(args.subject_loss_weights)
+
     model_config = {
         'EEG_Encoder': encoder_config,
         'Loss': {
@@ -369,7 +407,9 @@ if __name__ == "__main__":
             'clip_loss_scale': args.clip_loss_scale,
             'blur_scale': args.blur_scale,
             'align_scale': args.align_scale,
-            'mindeye2_ckpt_path' : args.mindeye2_ckpt_path,
+            'mindeye2_ckpt_path': args.mindeye2_ckpt_path,
+            'fmri_average_mode': args.fmri_average_mode,
+            'subject_loss_weights': subject_loss_weights,
         },
     }
 

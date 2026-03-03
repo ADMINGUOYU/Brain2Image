@@ -21,7 +21,8 @@
       "Bash(python -c \"import py_compile; py_compile.compile\\('model/EEG_fMRI_e2e.py', doraise=True\\); print\\('model OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('train/train_EEG_fMRI_e2e.py', doraise=True\\); print\\('train OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('infer/infer_EEG_fMRI_e2e.py', doraise=True\\); print\\('infer OK'\\)\")",
-      "Bash(python -m model.EEG_fMRI_e2e 2>&1)"
+      "Bash(python -m model.EEG_fMRI_e2e 2>&1)",
+      "Bash(python -c \"\nimport lmdb\nimport pickle\n\n# 检查多被试数据集的结构\ndb_path = 'datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_sub-02_sub-05_sub-07_no_things_test_250Hz'\ndb = lmdb.open\\(db_path, readonly=True, lock=False\\)\nwith db.begin\\(\\) as txn:\n    # 读取元数据\n    meta = pickle.loads\\(txn.get\\('meta_info'.encode\\(\\)\\)\\)\n    print\\('=== Metadata ==='\\)\n    print\\(f\\\\\"NSD subjects: {meta['nsd_subjects']}\\\\\"\\)\n    print\\(f\\\\\"fMRI take mean: {meta['fmri_take_mean']}\\\\\"\\)\n    print\\(\\)\n    \n    # 读取第一个训练样本\n    data = pickle.loads\\(txn.get\\('train_0'.encode\\(\\)\\)\\)\n    print\\('=== First training sample ==='\\)\n    print\\(f\\\\\"EEG shape: {data['eeg'].shape}\\\\\"\\)\n    print\\(f\\\\\"Number of NSD subjects: {len\\(data['nsd_data']\\)}\\\\\"\\)\n    for i, nd in enumerate\\(data['nsd_data']\\):\n        print\\(f\\\\\"  Subject {i} \\({nd['subject']}\\): fMRI shape = {nd['fmri'].shape}\\\\\"\\)\ndb.close\\(\\)\n\" 2>&1 | head -30)"
     ]
   }
 }

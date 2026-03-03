@@ -56,6 +56,11 @@ MIXUP_PCT=0.33
 BLURRY_RECON="true"
 EMB_SOURCE="things"  # Options: "nsd", "things" — which image source for generation targets
 
+# Multi-subject fMRI averaging strategy
+FMRI_AVERAGE_MODE="loss"  # Options: "embedding", "loss"
+SUBJECT_LOSS_WEIGHTS=""   # Example: "sub-01:0.4,sub-02:0.2,sub-05:0.2,sub-07:0.2"
+                          # Leave empty for uniform averaging
+
 # Please configure one of the following
 # ---------------------------------------------------- #
 # ATMS-specific parameters (if EEG_ENCODER_TYPE=ATMS)
@@ -136,7 +141,13 @@ CMD="python -m train.train_EEG_fMRI_e2e \
     --mixup_pct $MIXUP_PCT \
     --blurry_recon $BLURRY_RECON \
     --emb_source $EMB_SOURCE \
+    --fmri_average_mode $FMRI_AVERAGE_MODE \
     --script_path $0"
+
+# Add subject weights only if specified
+if [ -n "$SUBJECT_LOSS_WEIGHTS" ]; then
+    CMD="$CMD --subject_loss_weights \"$SUBJECT_LOSS_WEIGHTS\""
+fi
 
 # Add conditional arguments
 if [ -n "$FOUNDATION_DIR" ]; then
