@@ -10,6 +10,9 @@ WEIGHT_DECAY=5e-2
 CLIP_VALUE=1.0
 USE_AMP="true"
 NUM_WORKERS=16
+EXPERIMENT_FOLDER="" # Empty string means no subfolder under ./runs
+EXPERIMENT_NAME=""   # Empty string means default to "EEG_fMRI_e2e"
+CKPT_INTERVAL=50     # Set to number of epochs between checkpoints, or leave empty to only save best checkpoint
 
 # Backbone — change this to switch between models
 EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
@@ -40,7 +43,7 @@ ALIGN_MODEL_DIR=""     # Pretrained alignment checkpoint (warm-start)
 # Alignment Loss Parameters
 MSE_SCALE=1.0
 INFONCE_SCALE=0.2
-PROTO_DISTILL_SCALE=0.0
+PROTO_DISTILL_SCALE=1.0
 TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
 
@@ -150,6 +153,18 @@ fi
 
 if [ -n "$ALIGN_MODEL_DIR" ]; then
     CMD="$CMD --align_model_dir $ALIGN_MODEL_DIR"
+fi
+
+if [ -n "$EXPERIMENT_FOLDER" ]; then
+    CMD="$CMD --experiment_folder $EXPERIMENT_FOLDER"
+fi
+
+if [ -n "$EXPERIMENT_NAME" ]; then
+    CMD="$CMD --experiment_name $EXPERIMENT_NAME"
+fi
+
+if [ -n "$CKPT_INTERVAL" ]; then
+    CMD="$CMD --ckpt_interval $CKPT_INTERVAL"
 fi
 
 # Execute Command

@@ -35,7 +35,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train EEG-fMRI alignment model")
     
     # General training settings
-    parser.add_argument('--seed', type=int, default=3407, help='random seed (default: 0)')
+    parser.add_argument('--seed', type=int, default=648, help='random seed (default: 0)')
     parser.add_argument('--cuda', type=int, default=1, help='cuda number (default: 1)')
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs (default: 5)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size for training (default: 32)')
@@ -45,6 +45,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--weight_decay', type=float, default=5e-2, help='weight decay (default: 1e-2)')
     parser.add_argument('--optimizer', type=str, default='AdamW', help='optimizer (AdamW, SGD)')
     parser.add_argument('--clip_value', type=float, default=1, help='gradient clipping value (default: 1)')
+    parser.add_argument('--experiment_folder', type=str, default=None, help='experiment_folder: the main folder will under ./runs/experiment_folder/experiment_name_{timestamp}')
+    parser.add_argument('--experiment_name', type=str, default='EEG_fMRI_align', help='experiment_name: the subfolder for this specific run, will be under the main experiment folder with timestamp, e.g. ./runs/experiment_folder/experiment_name_{timestamp}')
 
     # Encoder backbone settings
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'], help='EEG encoder backbone (default: CBraMod)')
@@ -323,7 +325,10 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Create experiment folder
-    log_dir = f"runs/EEG_fMRI_align_{int(time())}"
+    if args.experiment_folder is not None:
+        log_dir = f"runs/{args.experiment_folder}/{args.experiment_name}_{int(time())}"
+    else:
+        log_dir = f"runs/{args.experiment_name}_{int(time())}"
     os.makedirs(log_dir, exist_ok=True)
     print(f"Logging to {log_dir}")
     # Create logging and ckpt directories

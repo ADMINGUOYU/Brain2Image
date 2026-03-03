@@ -11,8 +11,8 @@ export HUGGINGFACE_HUB_CACHE="datasets/transformers_cache"
 export TRANSFORMERS_CACHE="datasets/transformers_cache"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-EXPERIMENT_DIR="runs/Mar01_E2E/unfreeze_ME2_with_align"
-MODEL_DIR="${EXPERIMENT_DIR}/checkpoints/model_epoch_150.pth"
+EXPERIMENT_DIR="runs/..."
+MODEL_DIR="${EXPERIMENT_DIR}/checkpoints/model_epoch_....pth"
 OUTPUT_DIR="${EXPERIMENT_DIR}/inference"
 
 UNCLIP_CKPT="datasets/processed/mindeye2/unclip6_epoch0_step110000.ckpt"
@@ -33,7 +33,7 @@ NUM_WORKERS=16
 
 # ── Backbone — ATMS (must match the training run) ─────────────────────────────
 EEG_ENCODER_TYPE="ATMS"
-DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/things_sub-01_nsd_sub-01_250Hz_no_things_test-1500"
+DATASETS_DIR="datasets/processed/eeg_fmri_align_datasets/..."
 IMAGES_DF_DIR="datasets/processed"
 NORMALIZE_FMRI="true"
 EMB_SOURCE="things"

@@ -47,9 +47,6 @@ from scipy import signal
 
 # --------------- Start of configuration --------------- #
 
-# whether to use mirror link for downloading ckpt (in case of slow download from Hugging Face)
-MIRROR = True
-
 # Paths to necessary files
 processed_dir = "datasets/processed"
 
@@ -99,6 +96,10 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # saved under: <processed_di>/mindeye2/sub-<subject_number>_last_full.pth
 preserve_full_ckpt = True
 
+# Hugging Face mirror (optional, set to False to disable)
+MIRROR = False
+mirror = 'https://hf-mirror.com/'
+
 # ---------------- End of configuration ---------------- #
 
 # First we have to download the ckpt from MindEYE2
@@ -106,8 +107,11 @@ preserve_full_ckpt = True
 def download_ckpt(subject_number: int):
     # construct URL (make sure subject number in TWO digit)
     ckpt_url = f"https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/train_logs/final_subj{subject_number:02d}_pretrained_40sess_24bs/last.pth?download=true"
+    # set mirror url
     if MIRROR:
-        ckpt_url = f"https://hf-mirror.com/datasets/pscotti/mindeyev2/resolve/main/train_logs/final_subj{subject_number:02d}_pretrained_40sess_24bs/last.pth?download=true"
+        # replace the Hugging Face URL with the mirror link
+        ckpt_url = ckpt_url.replace("https://huggingface.co/", mirror)
+    # construct local path to save the ckpt
     ckpt_path = processed_dir + f"/mindeye2/sub-{subject_number:02d}_last.pth"
     if not os.path.exists(ckpt_path):
         print(f"Downloading MindEYE2 checkpoint for subject {subject_number}...")

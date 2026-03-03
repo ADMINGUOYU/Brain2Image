@@ -27,7 +27,7 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train EEG-fMRI E2E generation model")
 
     # General training settings
-    parser.add_argument('--seed', type=int, default=3407)
+    parser.add_argument('--seed', type=int, default=648)
     parser.add_argument('--cuda', type=int, default=0)
     parser.add_argument('--epochs', type=int, default=150)
     parser.add_argument('--batch_size', type=int, default=64)
@@ -35,6 +35,9 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--weight_decay', type=float, default=5e-2)
     parser.add_argument('--clip_value', type=float, default=1.0)
     parser.add_argument('--use_amp', type=lambda x: x.lower() == 'true', default=True)
+    parser.add_argument('--experiment_folder', type=str, default=None, help='experiment_folder: the main folder will under ./runs/experiment_folder/experiment_name_{timestamp}')
+    parser.add_argument('--experiment_name', type=str, default='EEG_fMRI_e2e', help='experiment_name: the subfolder for this specific run, will be under the main experiment folder with timestamp, e.g. ./runs/experiment_folder/experiment_name_{timestamp}')
+    parser.add_argument('--ckpt_interval', type=int, default=None, help='Number of epochs between saving checkpoints (default: None - save the best)')
 
     # Encoder backbone settings
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'])
@@ -104,7 +107,8 @@ def train(model: EEG_fMRI_E2E,
           clip_value: float = 1.0,
           mixup_pct: float = 0.33,
           use_amp: bool = True,
-          logger: SummaryWriter = None):
+          logger: SummaryWriter = None,
+          ckpt_interval: int = None,):
 
     best_val_loss = float('inf')
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
@@ -235,19 +239,20 @@ def train(model: EEG_fMRI_E2E,
               f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
 
         # ── Checkpointing (best val total loss) ──
-        if (epoch + 1) % 50 == 0:
-            checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
-            model.save_model(checkpoint_path)
-            print(f"Saved checkpoint to {checkpoint_path}")
-        # if avg_val['total'] < best_val_loss:
-        #     best_val_loss = avg_val['total']
-        #     for filename in os.listdir(ckpt_dir):
-        #         file_path = os.path.join(ckpt_dir, filename)
-        #         if os.path.isfile(file_path):
-        #             os.unlink(file_path)
-        #     checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
-        #     model.save_model(checkpoint_path)
-        #     print(f"Saved best model to {checkpoint_path}")
+        if ckpt_interval is not None and (epoch + 1) % ckpt_interval == 0:
+             checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
+             model.save_model(checkpoint_path)
+             print(f"Saved checkpoint to {checkpoint_path}")
+        else:
+            if avg_val['total'] < best_val_loss:
+                best_val_loss = avg_val['total']
+                for filename in os.listdir(ckpt_dir):
+                    file_path = os.path.join(ckpt_dir, filename)
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
+                model.save_model(checkpoint_path)
+                print(f"Saved best model to {checkpoint_path}")
 
         # ── TensorBoard logging ──
         if logger is not None:
@@ -280,7 +285,10 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Create experiment folder
-    log_dir = f"runs/Mar01/EEG_fMRI_e2e_{int(time())}"
+    if args.experiment_folder is not None:
+        log_dir = f"runs/{args.experiment_folder}/{args.experiment_name}_{int(time())}"
+    else:
+        log_dir = f"runs/{args.experiment_name}_{int(time())}"
     os.makedirs(log_dir, exist_ok=True)
     tensorboard_dir = f"{log_dir}/tensorboard"
     ckpt_dir = f"{log_dir}/checkpoints"
@@ -444,7 +452,7 @@ if __name__ == "__main__":
 
     # Train
     train(model, data_loader, optimizer, scheduler, device,
-          args.epochs, ckpt_dir, args.clip_value, args.mixup_pct, args.use_amp, logger)
+          args.epochs, ckpt_dir, args.clip_value, args.mixup_pct, args.use_amp, logger, args.ckpt_interval)
 
     logger.close()
     print("Training complete. Tensorboard logs saved to:", tensorboard_dir)

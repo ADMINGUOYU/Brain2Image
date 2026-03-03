@@ -11,6 +11,8 @@ WEIGHT_DECAY=5e-2
 OPTIMIZER="AdamW"
 CLIP_VALUE=1.0
 DROPOUT=0.25
+EXPERIMENT_FOLDER="" # Empty string means no subfolder under ./runs
+EXPERIMENT_NAME=""   # Empty string means default to "EEG_fMRI_align"
 
 # Backbone — change this to switch between models
 EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
@@ -35,7 +37,7 @@ MODEL_DIR=""  # Only set if loading full checkpoint
 # Loss / Training Parameters
 MSE_SCALE=1.0
 INFONCE_SCALE=0.2
-PROTO_DISTILL_SCALE=0.0
+PROTO_DISTILL_SCALE=1.0
 TEMPERATURE=0.1
 NORMALIZE_FMRI="true"
 
@@ -119,6 +121,14 @@ fi
 
 if [ -n "$MODEL_DIR" ]; then
     CMD="$CMD --model_dir $MODEL_DIR"
+fi
+
+if [ -n "$EXPERIMENT_FOLDER" ]; then
+    CMD="$CMD --experiment_folder $EXPERIMENT_FOLDER"
+fi
+
+if [ -n "$EXPERIMENT_NAME" ]; then
+    CMD="$CMD --experiment_name $EXPERIMENT_NAME"
 fi
 
 # Execute Command
