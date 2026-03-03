@@ -139,18 +139,30 @@ def train(model: EEG_fMRI_Align,
             proto_losses = []
     
             # Data loaded from dataset: 
-            # 'eeg', 'fmri', 'label', 'things_img_idx', 'nsd_img_idx'
-            for EEG, fMRI, label, _ , _ in tqdm(data_loader['train'], desc = f"Epoch {epoch+1}/{num_epochs}"):
+            # 'eeg', 'nsd_data', 'label', 'things_img_idx'
+            for EEG, nsd_data_list, label, _  in tqdm(data_loader['train'], desc = f"Epoch {epoch+1}/{num_epochs}"):
                 
                 # Move data to device
-                EEG, fMRI, label = EEG.to(device), fMRI.to(device), label.to(device)
+                EEG, label = EEG.to(device), label.to(device)
+                for nd in nsd_data_list:
+                    nd['fmri'] = nd['fmri'].to(device)
     
                 # Zero gradients
                 optimizer.zero_grad()
 
                 # Forward pass and compute loss
                 out = model.forward(EEG)
-                loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
+                
+                # Compute loss
+                loss = []; mse_loss = []; infonce_loss = []; proto_loss = []
+                for nd in nsd_data_list:
+                    at, ml, il, pl = model.calc_alignment_loss(
+                        out.squeeze(), nd['fmri'].squeeze(), label)
+                    loss.append(at); mse_loss.append(ml); infonce_loss.append(il); proto_loss.append(pl)
+                loss = torch.stack(loss).mean()
+                mse_loss = torch.stack(mse_loss).mean()
+                infonce_loss = torch.stack(infonce_loss).mean()
+                proto_loss = torch.stack(proto_loss).mean()
 
                 # Backward pass
                 loss.backward()
@@ -179,7 +191,9 @@ def train(model: EEG_fMRI_Align,
             avg_proto_loss = sum(proto_losses) / len(proto_losses)
             print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f} (MSE: {avg_mse_loss:.4f}, InfoNCE: {avg_infonce_loss:.4f}, Proto: {avg_proto_loss:.4f})")
             
-            # Validation - on training metrics
+            # Validation
+            outputs = []
+            fMRI_targets = []
             with torch.no_grad():
                 model.eval()
                 val_loss = 0.0
@@ -187,10 +201,28 @@ def train(model: EEG_fMRI_Align,
                 infonce_val_loss = 0.0
                 proto_val_loss = 0.0
 
-                for EEG, fMRI, label, _ , _ in data_loader['val']:
-                    EEG, fMRI, label = EEG.to(device), fMRI.to(device), label.to(device)
+                for EEG, nsd_data_list, label, _  in tqdm(data_loader['val'], desc = f"Validation Epoch {epoch+1}"):
+
+                    # Move data to device
+                    EEG, label = EEG.to(device), label.to(device)
+                    for nd in nsd_data_list:
+                        nd['fmri'] = nd['fmri'].to(device)
+                    # append average fmri
+                    fMRI_targets.append(torch.mean(torch.stack([nd['fmri'] for nd in nsd_data_list], dim = 0), dim = 0))
+                    # forward pass
                     out = model.forward(EEG)
-                    loss, mse_loss, infonce_loss, proto_loss = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
+                    outputs.append(out)
+                    # compute loss
+                    loss = []; mse_loss = []; infonce_loss = []; proto_loss = []
+                    for nd in nsd_data_list:
+                        at, ml, il, pl = model.calc_alignment_loss(
+                            out.squeeze(), nd['fmri'].squeeze(), label)
+                        loss.append(at); mse_loss.append(ml); infonce_loss.append(il); proto_loss.append(pl)
+                    loss = torch.stack(loss).mean()
+                    mse_loss = torch.stack(mse_loss).mean()
+                    infonce_loss = torch.stack(infonce_loss).mean()
+                    proto_loss = torch.stack(proto_loss).mean()
+                    # accumulate validation losses
                     val_loss += loss.item()
                     mse_val_loss += mse_loss.item()
                     infonce_val_loss += infonce_loss.item()
@@ -201,28 +233,11 @@ def train(model: EEG_fMRI_Align,
                 avg_mse_val_loss = mse_val_loss / len(data_loader['val'])
                 avg_infonce_val_loss = infonce_val_loss / len(data_loader['val'])
 
-            # Validation - on val metrics
-            outputs = []
-            fMRI_targets = []
-            val_loss = 0.0
-            with torch.no_grad():
-                model.eval()
-                for EEG, fMRI, label, _ , _ in tqdm(data_loader['val'], desc=f"Validation Epoch {epoch+1}"):
-
-                    # Move data to device
-                    EEG, fMRI = EEG.to(device), fMRI.to(device)
-
-                    # Forward pass and compute loss
-                    out = model.forward(EEG)
-                    outputs.append(out)
-                    fMRI_targets.append(fMRI)
-                    loss, _, _, _ = model.calc_alignment_loss(out.squeeze(), fMRI.squeeze(), label)
-                    val_loss += loss.item()
-
                 # concatenate outputs and compute metrics
-                outputs = torch.cat(outputs, dim=0)
-                fMRI_targets = torch.cat(fMRI_targets, dim=0)
+                outputs = torch.cat(outputs, dim = 0)
+                fMRI_targets = torch.cat(fMRI_targets, dim = 0)
                 mse, cos_sim, retrieval_acc, retrieval_acc_top10 = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
+            
             # verbose validation metrics
             avg_val_loss = val_loss / len(data_loader['val'])
             print(f"Epoch [{epoch+1}/{num_epochs}] - Val Loss: {avg_val_loss:.4f} (MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc (Top1): {retrieval_acc:.4f}, Top10: {retrieval_acc_top10:.4f})")
@@ -282,19 +297,21 @@ def test(model: EEG_fMRI_Align,
     fMRI_targets = []
     with torch.no_grad():
 
-        for EEG, fMRI, _ , _ , _ in tqdm(data_loader, desc = "Testing"):
+        for EEG, nsd_data_list, _ , _ in tqdm(data_loader, desc = "Testing"):
 
             # Move data to device
-            EEG, fMRI = EEG.to(device), fMRI.to(device)
+            EEG = EEG.to(device)
+            for nd in nsd_data_list:
+                nd['fmri'] = nd['fmri'].to(device)
+            fMRI_targets.append(torch.mean(torch.stack([nd['fmri'] for nd in nsd_data_list], dim = 0), dim = 0))
 
             # Forward pass
             out = model.forward(EEG)
             outputs.append(out)
-            fMRI_targets.append(fMRI)
 
         # concatenate outputs and compute metrics
-        outputs = torch.cat(outputs, dim=0)
-        fMRI_targets = torch.cat(fMRI_targets, dim=0)
+        outputs = torch.cat(outputs, dim = 0)
+        fMRI_targets = torch.cat(fMRI_targets, dim = 0)
         mse, cos_sim, retrieval_acc, retrieval_acc_top10 = model.get_metrics_for_alignment(outputs.squeeze(), fMRI_targets.squeeze())
         print(f"Test Metrics - MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, Retrieval Acc (Top1): {retrieval_acc:.4f}, Top10: {retrieval_acc_top10:.4f}")
 
