@@ -152,6 +152,15 @@ def train(model: EEG_fMRI_Align,
 
                 # Forward pass and compute loss
                 out = model.forward(EEG)
+
+                # nsd_data_list is not allowed to be empty for alignment
+                # training - we only warn this in training loop (assuming 
+                # same situation will happen in validation and testing)
+                if not nsd_data_list:
+                    raise ValueError("nsd_data_list is empty, cannot compute alignment loss\n" +
+                                     "If you are using dataset from 'process_EEG_ONLY_align_liked.py'\n" +
+                                     "or 'process_EEG_fMRI_align_concat.py' with 'remove_nsd_data' set to true.\n" +
+                                     "Then the dataset is not meant for this alignment training.")
                 
                 # Compute loss
                 loss = []; mse_loss = []; infonce_loss = []; proto_loss = []

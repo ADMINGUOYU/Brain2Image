@@ -195,50 +195,68 @@ class EEG_fMRI_E2E(nn.Module):
         Returns:
             dict of losses: total, align, prior, clip, blur, mse, infonce, proto
         """
+
         # 1. Multi-subject fMRI alignment loss computation
-        if self.fmri_average_mode == "embedding":
-            # Embedding-level averaging: average fMRI first, then compute loss once
-            fmri_avg = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim=0)
-            align_total, mse_loss, infonce_loss, proto_loss = \
-                self.align_model.calc_alignment_loss(eeg_embeds, fmri_avg, label)
+        # Check if nsd_data_list is empty before computing alignment loss
+        # if empty, we warn user once for this training mode and make all relative
+        # alignment losses zero (for consistency)
+        if not nsd_data_list:
+            # Print warning only once per model instance
+            self._missing_fmri_alignment_warning_printed = getattr(self, '_missing_fmri_alignment_warning_printed', False)
+            if not self._missing_fmri_alignment_warning_printed:
+                print("\033[93mWarning: nsd_data_list is empty, skipping alignment loss computation.\n" +
+                      "This should only happen if your dataset is not meant for alignment training.\n" +
+                      "All alignment losses will be set to zero for this batch.\033[0m")
+                self._missing_fmri_alignment_warning_printed = True
+            # Set all alignment losses to zero tensors on the correct device
+            align_total = torch.tensor(0.0, device = eeg_embeds.device)
+            mse_loss = torch.tensor(0.0, device = eeg_embeds.device)
+            infonce_loss = torch.tensor(0.0, device = eeg_embeds.device)
+            proto_loss = torch.tensor(0.0, device = eeg_embeds.device)
+        else:
+            if self.fmri_average_mode == "embedding":
+                # Embedding-level averaging: average fMRI first, then compute loss once
+                fmri_avg = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim=0)
+                align_total, mse_loss, infonce_loss, proto_loss = \
+                    self.align_model.calc_alignment_loss(eeg_embeds, fmri_avg, label)
 
-        elif self.fmri_average_mode == "loss":
-            # Loss-level averaging: compute loss per subject, then average
-            align_totals = []
-            mse_losses = []
-            infonce_losses = []
-            proto_losses = []
+            elif self.fmri_average_mode == "loss":
+                # Loss-level averaging: compute loss per subject, then average
+                align_totals = []
+                mse_losses = []
+                infonce_losses = []
+                proto_losses = []
 
-            for nd in nsd_data_list:
-                at, ml, il, pl = self.align_model.calc_alignment_loss(
-                    eeg_embeds, nd['fmri'], label
-                )
+                for nd in nsd_data_list:
+                    at, ml, il, pl = self.align_model.calc_alignment_loss(
+                        eeg_embeds, nd['fmri'], label
+                    )
 
-                # Apply per-subject weight if specified
+                    # Apply per-subject weight if specified
+                    if self.subject_loss_weights is not None:
+                        subject_id = nd.get('subject', f'sub-{len(align_totals):02d}')
+                        weight = self.subject_loss_weights.get(subject_id, 1.0 / len(nsd_data_list))
+                        at = at * weight
+                        ml = ml * weight
+                        il = il * weight
+                        pl = pl * weight
+
+                    align_totals.append(at)
+                    mse_losses.append(ml)
+                    infonce_losses.append(il)
+                    proto_losses.append(pl)
+
+                # Sum (not mean) if using weights, otherwise mean
                 if self.subject_loss_weights is not None:
-                    subject_id = nd.get('subject', f'sub-{len(align_totals):02d}')
-                    weight = self.subject_loss_weights.get(subject_id, 1.0 / len(nsd_data_list))
-                    at = at * weight
-                    ml = ml * weight
-                    il = il * weight
-                    pl = pl * weight
-
-                align_totals.append(at)
-                mse_losses.append(ml)
-                infonce_losses.append(il)
-                proto_losses.append(pl)
-
-            # Sum (not mean) if using weights, otherwise mean
-            if self.subject_loss_weights is not None:
-                align_total = torch.stack(align_totals).sum()
-                mse_loss = torch.stack(mse_losses).sum()
-                infonce_loss = torch.stack(infonce_losses).sum()
-                proto_loss = torch.stack(proto_losses).sum()
-            else:
-                align_total = torch.stack(align_totals).mean()
-                mse_loss = torch.stack(mse_losses).mean()
-                infonce_loss = torch.stack(infonce_losses).mean()
-                proto_loss = torch.stack(proto_losses).mean()
+                    align_total = torch.stack(align_totals).sum()
+                    mse_loss = torch.stack(mse_losses).sum()
+                    infonce_loss = torch.stack(infonce_losses).sum()
+                    proto_loss = torch.stack(proto_losses).sum()
+                else:
+                    align_total = torch.stack(align_totals).mean()
+                    mse_loss = torch.stack(mse_losses).mean()
+                    infonce_loss = torch.stack(infonce_losses).mean()
+                    proto_loss = torch.stack(proto_losses).mean()
 
         # 2. Diffusion prior loss
         backbone = gen_outputs['backbone']  # (B, 256, 1664)
