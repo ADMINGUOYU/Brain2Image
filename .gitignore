@@ -6,6 +6,12 @@ datasets/*
 # Ignore ./runs directory
 runs/
 
+# Ignore tmp / testing files
+test.py
+MindEyeV2
+CLAUDE.md
+AGENTS.md
+
 # Ignore IDE files
 .idea/
 .vscode/
@@ -22,9 +28,3 @@ env/
 
 # Ignore Jupyter Notebook checkpoints
 .ipynb_checkpoints/
-test.py
-
-MindEyeV2
-CLAUDE.md
-
-AGENTS.md
