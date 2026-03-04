@@ -181,7 +181,19 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             }]
 
         # Use first subject's nsd_img_idx for image/embedding lookups
-        nsd_img_idx = nsd_data[0]['nsd_img_idx']
+        # Check if we have nsd_data
+        if not nsd_data:
+            # Print warning only once per model instance
+            self._missing_nsd_img_idx_warning_printed = getattr(self, '_missing_nsd_img_idx_warning_printed', False)
+            if not self._missing_nsd_img_idx_warning_printed:
+                print("\033[93mWarning: nsd_data_list is empty.\n" +
+                      "This should only happen if your dataset is not meant for alignment training.\n" +
+                      "NSD image data will be returned as zero vectors.\033[0m")
+                self._missing_nsd_img_idx_warning_printed = True
+            # Set nsd_img_idx to None
+            nsd_img_idx = None
+        else:
+            nsd_img_idx = nsd_data[0]['nsd_img_idx']
 
         # some assertions to make sure the data shapes are correct
         assert EEG.shape == (1, 63, 200) or EEG.shape == (1, 63, 250),\
@@ -221,12 +233,12 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
 
                 # Get the row for the current image index
                 things_row = self.things_img_idx_to_row.get(things_img_idx, None)
-                nsd_row = self.nsd_img_idx_to_row.get(nsd_img_idx, None)
+                nsd_row = self.nsd_img_idx_to_row.get(nsd_img_idx, None) if nsd_img_idx is not None else None
 
                 # Extract CLIP embedding and image data if available
                 if "image_embedding" in things_row and things_row["image_embedding"] is not None:
                     things_clip_embed = things_row["image_embedding"].astype(np.float32)
-                if "image_embedding" in nsd_row and nsd_row["image_embedding"] is not None:
+                if nsd_row and "image_embedding" in nsd_row and nsd_row["image_embedding"] is not None:
                     nsd_clip_embed = nsd_row["image_embedding"].astype(np.float32)
 
                 # Extract and process raw image data if available
@@ -239,7 +251,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
                     img = img.astype(np.float32) / 255.0
                     img = np.transpose(img, (2, 0, 1))  # (3, H, W)
                     things_image_data = img
-                if "image_data" in nsd_row and nsd_row["image_data"] is not None:
+                if nsd_row and "image_data" in nsd_row and nsd_row["image_data"] is not None:
                     img = nsd_row["image_data"]  # (H, W, 3) uint8
                     # Check datatype and shape before processing
                     assert img.dtype == np.uint8, f"Unexpected image dtype: {img.dtype} for NSD image index {nsd_img_idx}"
@@ -254,6 +266,7 @@ class EEG_fMRI_Generation_E2E_Dataset(Dataset):
             # if image data available
             # select corresponding embedding index
             if self.emb_source == "nsd":
+                if nsd_img_idx is None: raise ValueError(f"NSD image is not available for this sample.")
                 emb_idx = nsd_img_idx
             else:  # "things"
                 emb_idx = things_img_idx
