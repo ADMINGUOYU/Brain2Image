@@ -148,6 +148,10 @@ def train(model: EEG_fMRI_E2E,
     best_val_loss = float('inf')
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
+    # Alignment Enable FLAG
+    # Get one sample from training set and check if nsd_data_list is empty.
+    ALIGNMENT_ENABLED = len(next(iter(data_loader['train']))[1]) > 0  # nsd_data_list is at index 1
+
     for epoch in range(num_epochs):
         model.train()
         use_mixco = (epoch < int(mixup_pct * num_epochs))
@@ -217,15 +221,19 @@ def train(model: EEG_fMRI_E2E,
               f"(Align: {avg_train['align']:.4f}, Prior: {avg_train['prior']:.4f}, "
               f"CLIP: {avg_train['clip']:.4f}, Blur: {avg_train['blur']:.4f})")
 
-        # ── Validation Pass 1: Loss computation (no MixCo) ──
+        # Validation
         model.eval()
         val_accum = {k: [] for k in accum}
+        outputs_list = []
+        fmri_list = []
         with torch.no_grad():
-            for batch in data_loader['val']:
+            for batch in tqdm(data_loader['val'], desc = f"Val {epoch+1}"):
                 (EEG, nsd_data_list, label, _, _, _, _, _,
                  clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
-
+                
+                # Move data to device
                 EEG = EEG.to(device)
+                # NOTE: nsd data for alignment loss is optional
                 for nd in nsd_data_list:
                     nd['fmri'] = nd['fmri'].to(device)
                 label = label.to(device)
@@ -234,8 +242,20 @@ def train(model: EEG_fMRI_E2E,
                 cnx_features = cnx_features.to(device)
                 cnx_blurry_features = cnx_blurry_features.to(device)
 
+                # if ALIGNMENT_ENABLED, we take mean of all fmri data and
+                # append it to fmri_list for loss computation.
+                if ALIGNMENT_ENABLED:
+                    # Take mean of all fmri data
+                    fmri_mean = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim = 0)
+                    # Append to fmri_list
+                    fmri_list.append(fmri_mean)
+
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     eeg_embeds = model.forward_encoder(EEG)
+                    # if ALIGNMENT_ENABLED, we also append the eeg_embeds to 
+                    # outputs_list for loss computation.
+                    if ALIGNMENT_ENABLED:
+                        outputs_list.append(eeg_embeds)
                     gen_outputs = model.forward_generation(eeg_embeds)
                     losses = model.calc_e2e_loss(
                         eeg_embeds, nsd_data_list, label, gen_outputs,
@@ -246,26 +266,17 @@ def train(model: EEG_fMRI_E2E,
                 for k in val_accum:
                     val_accum[k].append(losses[k].item())
 
-        avg_val = {k: sum(v) / len(v) for k, v in val_accum.items()}
+            # if ALIGNMENT_ENABLED, we compute alignment metrics,
+            # else, wwe set them all 0
+            if not ALIGNMENT_ENABLED:
+                mse, cos_sim, ret_acc_top1, ret_acc_top10 = 0.0, 0.0, 0.0, 0.0
+            else:
+                all_outputs = torch.cat(outputs_list, dim = 0)
+                all_fmri = torch.cat(fmri_list, dim = 0)
+                mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
+                    model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
 
-        # ── Validation Pass 2: Alignment metrics ──
-        outputs_list = []
-        fmri_list = []
-        with torch.no_grad():
-            for batch in tqdm(data_loader['val'], desc=f"Val Metrics {epoch+1}"):
-                (EEG, nsd_data_list, label, _, _, _, _, _,
-                 clip_target, vae_latents, cnx_features, _ ) = batch
-                EEG = EEG.to(device)
-                fMRI = nsd_data_list[0]['fmri'].to(device)
-                with torch.amp.autocast('cuda', enabled=use_amp):
-                    eeg_embeds = model.forward_encoder(EEG)
-                outputs_list.append(eeg_embeds)
-                fmri_list.append(fMRI)
-
-            all_outputs = torch.cat(outputs_list, dim=0)
-            all_fmri = torch.cat(fmri_list, dim=0)
-            mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
-                model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
+        avg_val = {k: sum(v) / len(v) for k, v in val_accum.items()}     
 
         print(f"Epoch [{epoch+1}/{num_epochs}] - Val Total: {avg_val['total']:.4f} "
               f"(Align: {avg_val['align']:.4f}, Prior: {avg_val['prior']:.4f}, "
