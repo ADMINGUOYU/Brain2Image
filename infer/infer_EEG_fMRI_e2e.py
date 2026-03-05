@@ -313,7 +313,8 @@ def run_inference(
 
     Returns:
         all_eeg_embeds: (N, 4096) EEG embeddings (cpu)
-        all_fmri:       (N, 4096) fMRI targets    (cpu)
+        all_fmri:       (N, 4096) fMRI targets   (cpu)
+        NOTE: if no fMRI data, this would be NONE
     """
     model.eval()
     sample_idx = 0
@@ -402,11 +403,15 @@ def run_inference(
 
             # Accumulate embeddings (cpu to save GPU memory)
             all_eeg_embeds.append(eeg_embeds.cpu())
-            all_fmri.append(nsd_data_list[0]['fmri'].cpu())
+            # use mean of all subjects
+            # NOTE: check if nsd_data_list is empty
+            if len(nsd_data_list) != 0:
+                fmri_mean = torch.stack([nd['fmri'] for nd in nsd_data_list], dim = 0).mean(dim = 0)  # (B, 4096)
+                all_fmri.append(fmri_mean.cpu())
 
     return (
         torch.cat(all_eeg_embeds, dim=0),
-        torch.cat(all_fmri, dim=0),
+        torch.cat(all_fmri, dim=0) if len(all_fmri) > 0 else None,
     )
 
 
@@ -541,13 +546,18 @@ def main():
     )
 
     # ── Alignment metrics ─────────────────────────────────────────────────
-    print("Computing alignment metrics...")
-    all_eeg_embeds = all_eeg_embeds.to(device)
-    all_fmri = all_fmri.to(device)
-    mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
-        model.align_model.get_metrics_for_alignment(
-            all_eeg_embeds.squeeze(), all_fmri.squeeze()
-        )
+    # If no fMRI data was loaded, use 0 for alignment metrics
+    if all_fmri is None:
+        print("No fMRI data available; skipping alignment metrics.")
+        mse = cos_sim = ret_acc_top1 = ret_acc_top10 = 0.0
+    else:
+        print("Computing alignment metrics...")
+        all_eeg_embeds = all_eeg_embeds.to(device)
+        all_fmri = all_fmri.to(device)
+        mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
+            model.align_model.get_metrics_for_alignment(
+                all_eeg_embeds.squeeze(), all_fmri.squeeze()
+            )
 
     metrics = {
         "split": args.split,
