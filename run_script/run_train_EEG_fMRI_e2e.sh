@@ -14,6 +14,13 @@ EXPERIMENT_FOLDER="" # Empty string means no subfolder under ./runs
 EXPERIMENT_NAME=""   # Empty string means default to "EEG_fMRI_e2e"
 CKPT_INTERVAL=50     # Set to number of epochs between checkpoints, or leave empty to only save best checkpoint
 
+# Multi-GPU Configuration
+NUM_GPUS=1                    # GPUs per node
+GLOBAL_BATCH_SIZE=$((BATCH_SIZE * NUM_GPUS))
+
+# Multi-GPU environment (auto-configured for single node)
+export MASTER_PORT=$((RANDOM % (19000 - 11000 + 1) + 11000))
+
 # Backbone — change this to switch between models
 EEG_ENCODER_TYPE="ATMS"  # Options: "CBraMod", "ATMS"
 
@@ -98,11 +105,11 @@ if [ "$USE_PRETRAINED_WEIGHTS" = "true" ] && [ -z "$FOUNDATION_DIR" ]; then
 fi
 
 # Build Command
-CMD="python -m train.train_EEG_fMRI_e2e \
+CMD="accelerate launch --num_processes=$NUM_GPUS --mixed_precision=fp16 -m train.train_EEG_fMRI_e2e \
     --seed $SEED \
     --cuda $CUDA \
     --epochs $EPOCHS \
-    --batch_size $BATCH_SIZE \
+    --batch_size $GLOBAL_BATCH_SIZE \
     --lr $LR \
     --weight_decay $WEIGHT_DECAY \
     --clip_value $CLIP_VALUE \

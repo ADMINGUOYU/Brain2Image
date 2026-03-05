@@ -9,6 +9,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import OneCycleLR
 
+from accelerate import Accelerator
+
 from model.EEG_fMRI_e2e import EEG_fMRI_E2E
 from data.EEG_fMRI_generation_e2e_dataset import get_generation_data_loader
 from model.MindEYE2 import mixco, mixco_clip_target
@@ -143,10 +145,11 @@ def train(model: EEG_fMRI_E2E,
           mixup_pct: float = 0.33,
           use_amp: bool = True,
           logger: SummaryWriter = None,
-          ckpt_interval: int = None,):
+          ckpt_interval: int = None,
+          accelerator: Accelerator = None,
+          local_rank: int = 0,):
 
     best_val_loss = float('inf')
-    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     # Alignment Enable FLAG
     # Get one sample from training set and check if nsd_data_list is empty.
@@ -159,7 +162,7 @@ def train(model: EEG_fMRI_E2E,
         # Accumulate losses
         accum = {k: [] for k in ['total', 'align', 'prior', 'clip', 'blur', 'mse', 'infonce', 'proto']}
 
-        for batch in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}"):
+        for batch in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}", disable=(local_rank != 0)):
             (EEG, nsd_data_list, label, _, _, _, _, _,
              clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
 
@@ -204,12 +207,10 @@ def train(model: EEG_fMRI_E2E,
 
             # Backward
             optimizer.zero_grad()
-            scaler.scale(losses['total']).backward()
+            accelerator.backward(losses['total'])
             if clip_value > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
-            scaler.step(optimizer)
-            scaler.update()
+                accelerator.clip_grad_norm_(model.parameters(), clip_value)
+            optimizer.step()
             scheduler.step()
 
             for k in accum:
@@ -221,135 +222,162 @@ def train(model: EEG_fMRI_E2E,
               f"(Align: {avg_train['align']:.4f}, Prior: {avg_train['prior']:.4f}, "
               f"CLIP: {avg_train['clip']:.4f}, Blur: {avg_train['blur']:.4f})")
 
-        # Validation
-        model.eval()
-        val_accum = {k: [] for k in accum}
-        outputs_list = []
-        fmri_list = []
-        with torch.no_grad():
-            for batch in tqdm(data_loader['val'], desc = f"Val {epoch+1}"):
-                (EEG, nsd_data_list, label, _, _, _, _, _,
-                 clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
-                
-                # Move data to device
-                EEG = EEG.to(device)
-                # NOTE: nsd data for alignment loss is optional
-                for nd in nsd_data_list:
-                    nd['fmri'] = nd['fmri'].to(device)
-                label = label.to(device)
-                clip_target = clip_target.to(device)
-                vae_latents = vae_latents.to(device)
-                cnx_features = cnx_features.to(device)
-                cnx_blurry_features = cnx_blurry_features.to(device)
+        # Validation (rank 0 only)
+        if local_rank == 0:
+            model.eval()
+            val_accum = {k: [] for k in accum}
+            outputs_list = []
+            fmri_list = []
+            with torch.no_grad():
+                for batch in tqdm(data_loader['val'], desc = f"Val {epoch+1}"):
+                    (EEG, nsd_data_list, label, _, _, _, _, _,
+                     clip_target, vae_latents, cnx_features, cnx_blurry_features) = batch
 
-                # if ALIGNMENT_ENABLED, we take mean of all fmri data and
-                # append it to fmri_list for loss computation.
-                if ALIGNMENT_ENABLED:
-                    # Take mean of all fmri data
-                    fmri_mean = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim = 0)
-                    # Append to fmri_list
-                    fmri_list.append(fmri_mean)
+                    # Move data to device
+                    EEG = EEG.to(device)
+                    # NOTE: nsd data for alignment loss is optional
+                    for nd in nsd_data_list:
+                        nd['fmri'] = nd['fmri'].to(device)
+                    label = label.to(device)
+                    clip_target = clip_target.to(device)
+                    vae_latents = vae_latents.to(device)
+                    cnx_features = cnx_features.to(device)
+                    cnx_blurry_features = cnx_blurry_features.to(device)
 
-                with torch.amp.autocast('cuda', enabled=use_amp):
-                    eeg_embeds = model.forward_encoder(EEG)
-                    # if ALIGNMENT_ENABLED, we also append the eeg_embeds to 
-                    # outputs_list for loss computation.
+                    # if ALIGNMENT_ENABLED, we take mean of all fmri data and
+                    # append it to fmri_list for loss computation.
                     if ALIGNMENT_ENABLED:
-                        outputs_list.append(eeg_embeds)
-                    gen_outputs = model.forward_generation(eeg_embeds)
-                    losses = model.calc_e2e_loss(
-                        eeg_embeds, nsd_data_list, label, gen_outputs,
-                        clip_target, vae_latents, cnx_features, cnx_blurry_features,
-                        epoch, num_epochs,
-                    )
+                        # Take mean of all fmri data
+                        fmri_mean = torch.stack([nd['fmri'] for nd in nsd_data_list]).mean(dim = 0)
+                        # Append to fmri_list
+                        fmri_list.append(fmri_mean)
 
-                for k in val_accum:
-                    val_accum[k].append(losses[k].item())
+                    with torch.amp.autocast('cuda', enabled=use_amp):
+                        eeg_embeds = model.forward_encoder(EEG)
+                        # if ALIGNMENT_ENABLED, we also append the eeg_embeds to
+                        # outputs_list for loss computation.
+                        if ALIGNMENT_ENABLED:
+                            outputs_list.append(eeg_embeds)
+                        gen_outputs = model.forward_generation(eeg_embeds)
+                        losses = model.calc_e2e_loss(
+                            eeg_embeds, nsd_data_list, label, gen_outputs,
+                            clip_target, vae_latents, cnx_features, cnx_blurry_features,
+                            epoch, num_epochs,
+                        )
 
-            # if ALIGNMENT_ENABLED, we compute alignment metrics,
-            # else, wwe set them all 0
-            if not ALIGNMENT_ENABLED:
-                mse, cos_sim, ret_acc_top1, ret_acc_top10 = 0.0, 0.0, 0.0, 0.0
+                    for k in val_accum:
+                        val_accum[k].append(losses[k].item())
+
+                # if ALIGNMENT_ENABLED, we compute alignment metrics,
+                # else, wwe set them all 0
+                if not ALIGNMENT_ENABLED:
+                    mse, cos_sim, ret_acc_top1, ret_acc_top10 = 0.0, 0.0, 0.0, 0.0
+                else:
+                    all_outputs = torch.cat(outputs_list, dim = 0)
+                    all_fmri = torch.cat(fmri_list, dim = 0)
+                    mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
+                        model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
+
+            avg_val = {k: sum(v) / len(v) for k, v in val_accum.items()}
+
+            print(f"Epoch [{epoch+1}/{num_epochs}] - Val Total: {avg_val['total']:.4f} "
+                  f"(Align: {avg_val['align']:.4f}, Prior: {avg_val['prior']:.4f}, "
+                  f"CLIP: {avg_val['clip']:.4f}, Blur: {avg_val['blur']:.4f})")
+            print(f"  Metrics — MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, "
+                  f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
+
+            # Checkpointing
+            unwrapped_model = accelerator.unwrap_model(model)
+            if ckpt_interval is not None and (epoch + 1) % ckpt_interval == 0:
+                 checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
+                 unwrapped_model.save_model(checkpoint_path)
+                 print(f"Saved checkpoint to {checkpoint_path}")
             else:
-                all_outputs = torch.cat(outputs_list, dim = 0)
-                all_fmri = torch.cat(fmri_list, dim = 0)
-                mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
-                    model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
+                if avg_val['total'] < best_val_loss:
+                    best_val_loss = avg_val['total']
+                    # Only delete the ones started with "best_model" to
+                    # avoid accidentally deleting other checkpoints if ckpt_interval is also used
+                    for filename in os.listdir(ckpt_dir):
+                        if filename.startswith("best_model_epoch_"):
+                            file_path = os.path.join(ckpt_dir, filename)
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                    checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
+                    unwrapped_model.save_model(checkpoint_path)
+                    print(f"Saved best model to {checkpoint_path}")
 
-        avg_val = {k: sum(v) / len(v) for k, v in val_accum.items()}     
+            # ── TensorBoard logging ──
+            if logger is not None:
+                for k in avg_train:
+                    logger.add_scalar(f'Loss_{k}/Train', avg_train[k], epoch)
+                    logger.add_scalar(f'Loss_{k}/Val', avg_val[k], epoch)
+                logger.add_scalar('Metrics/MSE', mse, epoch)
+                logger.add_scalar('Metrics/Cosine_Similarity', cos_sim, epoch)
+                logger.add_scalar('Metrics/Retrieval_Accuracy_Top1', ret_acc_top1, epoch)
+                logger.add_scalar('Metrics/Retrieval_Accuracy_Top10', ret_acc_top10, epoch)
+                optim_state = optimizer.state_dict()
+                for i, group in enumerate(optim_state['param_groups']):
+                    logger.add_scalar(f'Learning_Rate/Group_{i}', group['lr'], epoch)
 
-        print(f"Epoch [{epoch+1}/{num_epochs}] - Val Total: {avg_val['total']:.4f} "
-              f"(Align: {avg_val['align']:.4f}, Prior: {avg_val['prior']:.4f}, "
-              f"CLIP: {avg_val['clip']:.4f}, Blur: {avg_val['blur']:.4f})")
-        print(f"  Metrics — MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, "
-              f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
-
-        # Checkpointing
-        if ckpt_interval is not None and (epoch + 1) % ckpt_interval == 0:
-             checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
-             model.save_model(checkpoint_path)
-             print(f"Saved checkpoint to {checkpoint_path}")
-        else:
-            if avg_val['total'] < best_val_loss:
-                best_val_loss = avg_val['total']
-                # Only delete the ones started with "best_model" to 
-                # avoid accidentally deleting other checkpoints if ckpt_interval is also used
-                for filename in os.listdir(ckpt_dir):
-                    if filename.startswith("best_model_epoch_"):
-                        file_path = os.path.join(ckpt_dir, filename)
-                        if os.path.isfile(file_path):
-                            os.unlink(file_path)
-                checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
-                model.save_model(checkpoint_path)
-                print(f"Saved best model to {checkpoint_path}")
-
-        # ── TensorBoard logging ──
-        if logger is not None:
-            for k in avg_train:
-                logger.add_scalar(f'Loss_{k}/Train', avg_train[k], epoch)
-                logger.add_scalar(f'Loss_{k}/Val', avg_val[k], epoch)
-            logger.add_scalar('Metrics/MSE', mse, epoch)
-            logger.add_scalar('Metrics/Cosine_Similarity', cos_sim, epoch)
-            logger.add_scalar('Metrics/Retrieval_Accuracy_Top1', ret_acc_top1, epoch)
-            logger.add_scalar('Metrics/Retrieval_Accuracy_Top10', ret_acc_top10, epoch)
-            optim_state = optimizer.state_dict()
-            for i, group in enumerate(optim_state['param_groups']):
-                logger.add_scalar(f'Learning_Rate/Group_{i}', group['lr'], epoch)
+        # Synchronize all processes at end of epoch
+        accelerator.wait_for_everyone()
 
 
 # Main function
 if __name__ == "__main__":
 
     args = get_args()
+
+    # Multi-GPU setup with accelerate
+    local_rank = os.getenv('RANK')
+    if local_rank is None:
+        local_rank = 0
+    else:
+        local_rank = int(local_rank)
+
+    num_devices = torch.cuda.device_count()
+    if num_devices == 0: num_devices = 1
+
+    accelerator = Accelerator(split_batches=False, mixed_precision="fp16" if args.use_amp else "no")
+    device = accelerator.device
+    print = accelerator.print  # only print on rank 0
+
     print("Arguments:")
     for arg in vars(args):
         print(f"  {arg}: {getattr(args, arg)}")
+
+    # Batch size scaling for multi-GPU
+    global_batch_size = args.batch_size
+    args.batch_size = global_batch_size // num_devices
+    print(f"Global batch size: {global_batch_size}, per-GPU batch size: {args.batch_size}, num_devices: {num_devices}")
 
     # Set random seed
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create experiment folder
+    # Create experiment folder (compute paths on all ranks, create dirs on main only)
     if args.experiment_folder is not None:
         log_dir = f"runs/{args.experiment_folder}/{args.experiment_name}_{int(time())}"
     else:
         log_dir = f"runs/{args.experiment_name}_{int(time())}"
-    os.makedirs(log_dir, exist_ok=True)
     tensorboard_dir = f"{log_dir}/tensorboard"
     ckpt_dir = f"{log_dir}/checkpoints"
-    os.makedirs(tensorboard_dir, exist_ok=True)
-    os.makedirs(ckpt_dir, exist_ok=True)
-    print(f"Logging to {log_dir}")
 
-    if args.script_path and os.path.isfile(args.script_path):
-        shutil.copy(args.script_path, f"{log_dir}/run_script.sh")
-        print(f"Saved launch script to {log_dir}/run_script.sh")
+    logger = None
+    if accelerator.is_main_process:
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(tensorboard_dir, exist_ok=True)
+        os.makedirs(ckpt_dir, exist_ok=True)
+        print(f"Logging to {log_dir}")
 
-    logger = SummaryWriter(log_dir=tensorboard_dir)
+        if args.script_path and os.path.isfile(args.script_path):
+            shutil.copy(args.script_path, f"{log_dir}/run_script.sh")
+            print(f"Saved launch script to {log_dir}/run_script.sh")
+
+        logger = SummaryWriter(log_dir=tensorboard_dir)
 
     # Load data (with pre-computed generation targets)
     data_loader = get_generation_data_loader(
@@ -490,6 +518,11 @@ if __name__ == "__main__":
 
     optimizer = optim.AdamW(param_groups)
 
+    # Prepare model, optimizer, and train dataloader with accelerate
+    model, optimizer = accelerator.prepare(model, optimizer)
+    data_loader['train'] = accelerator.prepare(data_loader['train'])
+    # Leave val/test dataloaders unprepared — only run on rank 0
+
     total_steps = args.epochs * len(data_loader['train'])
     max_lrs = [g['lr'] for g in param_groups]
     scheduler = OneCycleLR(
@@ -499,6 +532,7 @@ if __name__ == "__main__":
         pct_start=min(2 / args.epochs, 0.1),
         final_div_factor=1000,
     )
+    scheduler = accelerator.prepare(scheduler)
 
     print(f"Optimizer groups: {len(param_groups)}")
     for i, g in enumerate(param_groups):
@@ -506,7 +540,9 @@ if __name__ == "__main__":
 
     # Train
     train(model, data_loader, optimizer, scheduler, device,
-          args.epochs, ckpt_dir, args.clip_value, args.mixup_pct, args.use_amp, logger, args.ckpt_interval)
+          args.epochs, ckpt_dir, args.clip_value, args.mixup_pct, args.use_amp, logger, args.ckpt_interval,
+          accelerator, local_rank)
 
-    logger.close()
+    if accelerator.is_main_process and logger is not None:
+        logger.close()
     print("Training complete. Tensorboard logs saved to:", tensorboard_dir)
