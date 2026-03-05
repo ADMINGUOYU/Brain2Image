@@ -284,7 +284,7 @@ def train(model: EEG_fMRI_E2E,
         print(f"  Metrics — MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, "
               f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
 
-        # ── Checkpointing (best val total loss) ──
+        # Checkpointing
         if ckpt_interval is not None and (epoch + 1) % ckpt_interval == 0:
              checkpoint_path = f"{ckpt_dir}/model_epoch_{epoch+1}.pth"
              model.save_model(checkpoint_path)
@@ -292,10 +292,13 @@ def train(model: EEG_fMRI_E2E,
         else:
             if avg_val['total'] < best_val_loss:
                 best_val_loss = avg_val['total']
+                # Only delete the ones started with "best_model" to 
+                # avoid accidentally deleting other checkpoints if ckpt_interval is also used
                 for filename in os.listdir(ckpt_dir):
-                    file_path = os.path.join(ckpt_dir, filename)
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
+                    if filename.startswith("best_model_epoch_"):
+                        file_path = os.path.join(ckpt_dir, filename)
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
                 checkpoint_path = f"{ckpt_dir}/best_model_epoch_{epoch+1}.pth"
                 model.save_model(checkpoint_path)
                 print(f"Saved best model to {checkpoint_path}")
