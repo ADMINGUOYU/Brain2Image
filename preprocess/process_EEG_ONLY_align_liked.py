@@ -42,6 +42,14 @@ processed_dir = "datasets/processed"
 # All subjects are combined into a SINGLE LMDB dataset.
 things_subjects = ['sub-01']
 
+# Path to the image split info CSV produced by process_EEG_fMRI_align.py
+# (optional). When provided, images that appeared in the paired alignment
+# dataset keep their already-assigned split.
+# align_split_info_csv = "datasets/processed/eeg_fmri_align_datasets/" + \
+#                        "....csv"
+# align_split_info_csv = None  # Set to None to disable CSV-guided splitting
+align_split_info_csv = None
+
 # EEG resampling target frequency
 TARGET_FREQ = 250  # Hz (use 200 for CBraMod, 250 for ATMS)
 
@@ -181,49 +189,115 @@ print(f"EEG shape after resampling: {eeg_data_list[0].shape}")
 
 # ------------------------------------------------------------------ #
 # Train / val / test split
-# Same strategy as process_EEG_fMRI_align.py:
-#   - (subject, image) pairs sharing the same image index across subjects
-#     are treated as overlapping and go to train
-#   - remaining entries are split by ratio
+#
+#   1. If align_split_info_csv is set and the file exists, load it and
+#      honour the pre-assigned splits for images that already appeared in
+#      the paired (aligned) dataset.  Remaining images (EEG-only extras)
+#      are distributed so that the OVERALL split ratios match split_ratios.
+#   2. Otherwise (or if the file is not found), fall back to the original
+#      strategy: overlapping images → train, rest split by ratio.
 # ------------------------------------------------------------------ #
+
+# Verbose
+print(f"\n>>> Performing train/val/test split >>>")
+
+# Small epsilon used to keep train_test_split fractions strictly inside (0, 1)
+_SPLIT_EPS = 1e-9
+
+# Build a lookup dict: things_image_index -> list of global indices in our dataset
 things_img_idx_to_pair_indices: typing.Dict[int, typing.List[int]] = {}
 for idx, t_idx in enumerate(things_img_idx_list):
     things_img_idx_to_pair_indices.setdefault(t_idx, []).append(idx)
 
+# Initialize empty split lists
+training_indices: typing.List[int] = []
+val_indices:      typing.List[int] = []
+test_indices:     typing.List[int] = []
+
+# Attempt to load pre-assigned split info from the aligned dataset
+align_split_df: typing.Optional[pd.DataFrame] = None
+if align_split_info_csv is not None:
+    if os.path.exists(align_split_info_csv):
+        align_split_df = pd.read_csv(align_split_info_csv)
+        required_cols = {'things_img_idx', 'split'}
+        if not required_cols.issubset(align_split_df.columns):
+            print(f"\033[91mWarning: align_split_info_csv at {align_split_info_csv} "
+                  f"is missing columns {required_cols - set(align_split_df.columns)}. "
+                  f"Falling back to default split.\033[0m")
+            align_split_df = None
+        else:
+            print(f"\033[92mLoaded align split info CSV ({len(align_split_df)} rows) "
+                  f"from {align_split_info_csv}\033[0m")
+    else:
+        print(f"\033[93mWarning: align_split_info_csv was specified as '{align_split_info_csv}' "
+              f"but the file was not found. Falling back to default split.\033[0m")
+
+# If we have valid align split info, assign samples accordingly and keep track of unassigned ones
+if align_split_df is not None:
+
+    # unassigned list
+    unassigned_things_img_idx_to_pair_indices: typing.Dict[int, typing.List[int]] = {}
+
+    # Assign samples to splits based on align_split_df
+    for img_idx, pair_indices in things_img_idx_to_pair_indices.items():
+        if img_idx in align_split_df['things_img_idx'].values:
+            split = align_split_df[align_split_df['things_img_idx'] == img_idx]['split'].iloc[0]
+            if split == 'train':
+                training_indices.extend(pair_indices)
+            elif split == 'val':
+                val_indices.extend(pair_indices)
+            elif split == 'test':
+                test_indices.extend(pair_indices)
+        else:
+            # Image index not found in align_split_df, add to unassigned dict for later processing
+            unassigned_things_img_idx_to_pair_indices[img_idx] = pair_indices
+    
+    # override the original dict with the unassigned one for later processing
+    things_img_idx_to_pair_indices = unassigned_things_img_idx_to_pair_indices
+
+    # Verbose
+    print(f"\033[92mAssigned {len(training_indices)} samples to train, "
+          f"{len(val_indices)} to val, {len(test_indices)} to test based on the CSV provided.\033[0m")
+
+# Now we check for the unassigned samples, if there are any duplicates, assign them to train
 overlap_indices: typing.Set[int] = set()
 for indices in things_img_idx_to_pair_indices.values():
     if len(indices) > 1:
         overlap_indices.update(indices)
 print(f"\033[93mFound {len(overlap_indices)} entries sharing an image index with another entry "
       f"(same image seen by multiple subjects or multiple times) — assigned to train.\033[0m")
+# assign all overlapping samples to training set
+training_indices.extend(overlap_indices)
 
-training_indices: typing.List[int] = list(overlap_indices)
-val_indices: typing.List[int] = []
-test_indices: typing.List[int] = []
-
-remaining_indices = [idx for idx in range(len(label_list)) if idx not in overlap_indices]
+# Calculate how many samples are left for splitting after assigning overlaps to training
+assigned_indices = set(training_indices + val_indices + test_indices)
+remaining_indices = [idx for idx in range(len(label_list)) if idx not in assigned_indices]
 
 if len(remaining_indices) == 0:
     print("\033[91mWarning: All samples overlap. Assigning everything to training set.\033[0m")
 else:
+    # Note that we already have something in training set, val set and testing set (latter is
+    # assigned based on the CSV if provided, otherwise empty). We want to split the remaining
+    # samples according to split_ratios, but we need to adjust the ratios to account for the
+    # already assigned samples.
     remaining_split_ratios = {
-        'train': max(0.0, (split_ratios['train'] * len(label_list) - len(overlap_indices)) / len(remaining_indices)),
-        'val':   split_ratios['val']  * len(label_list) / len(remaining_indices),
-        'test':  split_ratios['test'] * len(label_list) / len(remaining_indices),
+        'train': (split_ratios['train'] * len(label_list) - len(training_indices)) / len(remaining_indices) if len(remaining_indices) > 0 else 0,
+        'val':   (split_ratios['val']   * len(label_list) - len(val_indices))      / len(remaining_indices) if len(remaining_indices) > 0 else 0,
+        'test':  (split_ratios['test']  * len(label_list) - len(test_indices))     / len(remaining_indices) if len(remaining_indices) > 0 else 0,
     }
     val_test_size = remaining_split_ratios['val'] + remaining_split_ratios['test']
     if val_test_size <= 0 or val_test_size >= 1.0:
         training_indices.extend(remaining_indices)
     else:
         train_idx, temp_idx = train_test_split(
-            remaining_indices, test_size=val_test_size, random_state=split_seed
+            remaining_indices, test_size = val_test_size, random_state = split_seed
         )
         test_ratio = remaining_split_ratios['test'] / val_test_size
         if test_ratio <= 0 or test_ratio >= 1.0:
             val_indices.extend(temp_idx)
         else:
             val_idx, test_idx = train_test_split(
-                temp_idx, test_size=test_ratio, random_state=split_seed
+                temp_idx, test_size = test_ratio, random_state = split_seed
             )
             training_indices.extend(train_idx)
             val_indices.extend(val_idx)
