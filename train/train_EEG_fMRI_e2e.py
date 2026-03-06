@@ -151,6 +151,11 @@ def train(model: EEG_fMRI_E2E,
 
     best_val_loss = float('inf')
 
+    # Get the underlying model (unwrapped from DDP) for calling custom methods.
+    # DDP gradient sync happens via parameter hooks during .backward(), not .forward(),
+    # so calling custom methods on the unwrapped model is correct for multi-GPU training.
+    unwrapped_model = accelerator.unwrap_model(model)
+
     # Alignment Enable FLAG
     # Get one sample from training set and check if nsd_data_list is empty.
     ALIGNMENT_ENABLED = len(next(iter(data_loader['train']))[1]) > 0  # nsd_data_list is at index 1
@@ -177,7 +182,7 @@ def train(model: EEG_fMRI_E2E,
 
             # Stage 1: EEG encoder (BEFORE MixCo — raw EEG is never augmented)
             with torch.amp.autocast('cuda', enabled=use_amp):
-                eeg_embeds = model.forward_encoder(EEG)  # (B, 4096)
+                eeg_embeds = unwrapped_model.forward_encoder(EEG)  # (B, 4096)
 
             # Keep original embeddings for alignment loss
             eeg_embeds_orig = eeg_embeds.detach().clone()
@@ -198,8 +203,8 @@ def train(model: EEG_fMRI_E2E,
 
             # Stage 2: BrainNetwork + loss (from mixed embeddings)
             with torch.amp.autocast('cuda', enabled=use_amp):
-                gen_outputs = model.forward_generation(eeg_embeds_mixed)
-                losses = model.calc_e2e_loss(
+                gen_outputs = unwrapped_model.forward_generation(eeg_embeds_mixed)
+                losses = unwrapped_model.calc_e2e_loss(
                     eeg_embeds_orig, nsd_data_list, label, gen_outputs,
                     clip_target_mixed, vae_latents, cnx_features, cnx_blurry_features,
                     epoch, num_epochs, perm, betas, select,
@@ -253,13 +258,13 @@ def train(model: EEG_fMRI_E2E,
                         fmri_list.append(fmri_mean)
 
                     with torch.amp.autocast('cuda', enabled=use_amp):
-                        eeg_embeds = model.forward_encoder(EEG)
+                        eeg_embeds = unwrapped_model.forward_encoder(EEG)
                         # if ALIGNMENT_ENABLED, we also append the eeg_embeds to
                         # outputs_list for loss computation.
                         if ALIGNMENT_ENABLED:
                             outputs_list.append(eeg_embeds)
-                        gen_outputs = model.forward_generation(eeg_embeds)
-                        losses = model.calc_e2e_loss(
+                        gen_outputs = unwrapped_model.forward_generation(eeg_embeds)
+                        losses = unwrapped_model.calc_e2e_loss(
                             eeg_embeds, nsd_data_list, label, gen_outputs,
                             clip_target, vae_latents, cnx_features, cnx_blurry_features,
                             epoch, num_epochs,
@@ -276,7 +281,7 @@ def train(model: EEG_fMRI_E2E,
                     all_outputs = torch.cat(outputs_list, dim = 0)
                     all_fmri = torch.cat(fmri_list, dim = 0)
                     mse, cos_sim, ret_acc_top1, ret_acc_top10 = \
-                        model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
+                        unwrapped_model.align_model.get_metrics_for_alignment(all_outputs.squeeze(), all_fmri.squeeze())
 
             avg_val = {k: sum(v) / len(v) for k, v in val_accum.items()}
 
