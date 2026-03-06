@@ -263,9 +263,10 @@ for (things_subject, nsd_subject_tuple), mindeye2_ckpt_list in zip(subjects, min
         eeg_data_list.append(eeg_row.iloc[0]['eeg'])  # (num_trials, channels, timepoints)
     del things_eeg_data_df
     assert len(eeg_data_list) == len(things_img_idx_list)
-    print(f"\033[92mSuccessfully fetched EEG data for {len(eeg_data_list)} matched pairs.\033[0m")
+    print(f"\033[92m\nSuccessfully fetched EEG data for {len(eeg_data_list)} matched pairs.\033[0m")
 
     # Resample EEG
+    print(f"\n>>> Resampling EEG data to {TARGET_FREQ} Hz >>>")
     for i in tqdm(range(len(eeg_data_list)), desc = "Resampling EEG data"):
         eeg_data_list[i] = signal.resample(eeg_data_list[i], TARGET_FREQ, axis = 2).astype(np.float32)
     print(f"Resampled EEG to {TARGET_FREQ} Hz. Shape: {eeg_data_list[0].shape}")
@@ -328,8 +329,25 @@ for (things_subject, nsd_subject_tuple), mindeye2_ckpt_list in zip(subjects, min
                 test_indices.extend(test_idx)
     print(f"\033[92mSplit: train = {len(training_indices)}, val = {len(val_indices)}, test = {len(test_indices)}\033[0m")
 
-    # Initialise LMDB
+    # Set output path for our dataset
     output_dir = f"{processed_dir}/eeg_fmri_align_datasets/things_{things_subject}_nsd_{nsd_subjects_tag}{test_suffix}_{TARGET_FREQ}Hz"
+
+    # Save image split info CSV alongside the LMDB directory so that
+    # process_EEG_ONLY_align_liked.py can honour the same split assignments.
+    # CSV columns: things_img_idx, split
+    split_info_csv_path = f"{output_dir}_things_image_split_info.csv"
+    os.makedirs(os.path.dirname(split_info_csv_path), exist_ok = True)
+    split_rows = []
+    for idx in training_indices:
+        split_rows.append({'things_img_idx': things_img_idx_list[idx], 'split': 'train'})
+    for idx in val_indices:
+        split_rows.append({'things_img_idx': things_img_idx_list[idx], 'split': 'val'})
+    for idx in test_indices:
+        split_rows.append({'things_img_idx': things_img_idx_list[idx], 'split': 'test'})
+    pd.DataFrame(split_rows).to_csv(split_info_csv_path, index=False)
+    print(f"\033[92mSaved image split info CSV to {split_info_csv_path}\033[0m")
+
+    # Initialise LMDB
     if os.path.exists(output_dir):
         print(f"\033[93mOutput directory {output_dir} already exists. Removing it ...\033[0m")
         os.system(f"rm -rf {output_dir}")
