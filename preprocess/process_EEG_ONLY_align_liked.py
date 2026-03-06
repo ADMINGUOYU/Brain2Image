@@ -164,9 +164,6 @@ for things_subject in things_subjects:
             skipped += 1
             continue
         eeg_row = things_eeg_data_df[things_eeg_data_df['image_index'] == img_idx]
-        if len(eeg_row) == 0:
-            skipped += 1
-            continue
         things_img_idx_list.append(img_idx)
         label_list.append(image_index_to_cluster[img_idx])
         eeg_data_list.append(eeg_row.iloc[0]['eeg'])  # (num_trials, channels, timepoints)
@@ -228,6 +225,8 @@ if align_split_info_csv is not None:
         else:
             print(f"\033[92mLoaded align split info CSV ({len(align_split_df)} rows) "
                   f"from {align_split_info_csv}\033[0m")
+            # Pre-compute set for O(1) lookup
+            align_split_set = set(align_split_df['things_img_idx'].values)
     else:
         print(f"\033[93mWarning: align_split_info_csv was specified as '{align_split_info_csv}' "
               f"but the file was not found. Falling back to default split.\033[0m")
@@ -240,7 +239,7 @@ if align_split_df is not None:
 
     # Assign samples to splits based on align_split_df
     for img_idx, pair_indices in things_img_idx_to_pair_indices.items():
-        if img_idx in align_split_df['things_img_idx'].values:
+        if img_idx in align_split_set:
             split = align_split_df[align_split_df['things_img_idx'] == img_idx]['split'].iloc[0]
             if split == 'train':
                 training_indices.extend(pair_indices)
@@ -285,6 +284,14 @@ else:
         'val':   (split_ratios['val']   * len(label_list) - len(val_indices))      / len(remaining_indices) if len(remaining_indices) > 0 else 0,
         'test':  (split_ratios['test']  * len(label_list) - len(test_indices))     / len(remaining_indices) if len(remaining_indices) > 0 else 0,
     }
+    # Validate and clamp negative ratios
+    for key in remaining_split_ratios:
+        remaining_split_ratios[key] = max(0, remaining_split_ratios[key])
+    # Renormalize if sum > 1
+    ratio_sum = sum(remaining_split_ratios.values())
+    if ratio_sum > 1:
+        for key in remaining_split_ratios:
+            remaining_split_ratios[key] /= ratio_sum
     val_test_size = remaining_split_ratios['val'] + remaining_split_ratios['test']
     if val_test_size <= 0 or val_test_size >= 1.0:
         training_indices.extend(remaining_indices)
@@ -350,6 +357,7 @@ txn.commit()
 for split_name, indices in zip(['train', 'val', 'test'],
                                [training_indices, val_indices, test_indices]):
     print(f"\n>>> Processing {split_name} split with {len(indices)} samples >>>")
+    txn = db.begin(write=True)
     for idx in tqdm(indices, desc = f"Processing {split_name} samples"):
         eeg_data       = eeg_data_list[idx]   # (num_trials, channels, timepoints)
         label          = label_list[idx]
@@ -368,9 +376,8 @@ for split_name, indices in zip(['train', 'val', 'test'],
                 'things_img_idx': things_img_idx,
             }
             sample_key = f"{split_name}_{idx:05d}_{trial_i:05d}"
-            txn = db.begin(write = True)
             txn.put(key = sample_key.encode(), value = pickle.dumps(data_dict))
-            txn.commit()
+    txn.commit()
 
 db.close()
 print(f"\nFinished processing. Dataset saved at {output_dir}.")
