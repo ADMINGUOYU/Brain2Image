@@ -37,9 +37,12 @@ def convert_e2e_to_align(e2e_checkpoint_path: str,
     parameters = e2e_checkpoint[parameters_key]
 
     # Create a new checkpoint for alignment training
+    # Target keys: 
+    # dict_keys(['eeg_encoder', 'projection_head', 'parameters'])
     align_checkpoint = {
-        model_key: model_state_dict,
-        parameters_key: parameters
+        'eeg_encoder': model_state_dict.get('eeg_encoder', {}),
+        'projection_head': model_state_dict.get('projection_head', {}),
+        'parameters': parameters
     }
 
     # Save the new checkpoint
