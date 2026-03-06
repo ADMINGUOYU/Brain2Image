@@ -45,8 +45,16 @@ class EEG_fMRI_Align_Dataset(Dataset):
                         lock=False,
                         readahead=False,
                         meminit=False)
+        prefix = (mode + "_").encode()
         with _db.begin(write=False) as txn:
-            self.keys = [key.decode() for key, _ in txn.cursor() if key.decode().startswith(mode + '_')]
+            cursor = txn.cursor()
+            self.keys = []
+            if cursor.set_range(prefix):
+                for key, _ in cursor.iternext():
+                    k = key.decode()
+                    if not k.startswith(mode + "_"):
+                        break
+                    self.keys.append(k)
         _db.close()
 
     def __len__(self) -> int:
