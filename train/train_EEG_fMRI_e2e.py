@@ -225,7 +225,8 @@ def train(model: EEG_fMRI_E2E,
         avg_train = {k: sum(v) / len(v) for k, v in accum.items()}
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Total: {avg_train['total']:.4f} "
               f"(Align: {avg_train['align']:.4f}, Prior: {avg_train['prior']:.4f}, "
-              f"CLIP: {avg_train['clip']:.4f}, Blur: {avg_train['blur']:.4f})")
+              f"CLIP: {avg_train['clip']:.4f}, Blur: {avg_train['blur']:.4f}, "
+              f"Backbone Sim: {avg_train['backbone_sim']:.4f})")
 
         # Validation (rank 0 only)
         if local_rank == 0:
@@ -287,7 +288,8 @@ def train(model: EEG_fMRI_E2E,
 
             print(f"Epoch [{epoch+1}/{num_epochs}] - Val Total: {avg_val['total']:.4f} "
                   f"(Align: {avg_val['align']:.4f}, Prior: {avg_val['prior']:.4f}, "
-                  f"CLIP: {avg_val['clip']:.4f}, Blur: {avg_val['blur']:.4f})")
+                  f"CLIP: {avg_val['clip']:.4f}, Blur: {avg_val['blur']:.4f}, "
+                  f"Backbone Sim: {avg_val['backbone_sim']:.4f})")
             print(f"  Metrics — MSE: {mse:.4f}, CosSim: {cos_sim:.4f}, "
                   f"Top1: {ret_acc_top1:.4f}, Top10: {ret_acc_top10:.4f}")
 
@@ -320,6 +322,7 @@ def train(model: EEG_fMRI_E2E,
                 logger.add_scalar('Metrics/Cosine_Similarity', cos_sim, epoch)
                 logger.add_scalar('Metrics/Retrieval_Accuracy_Top1', ret_acc_top1, epoch)
                 logger.add_scalar('Metrics/Retrieval_Accuracy_Top10', ret_acc_top10, epoch)
+                logger.add_scalar('Metrics/Backbone_Similarity', avg_val['backbone_sim'], epoch)
                 optim_state = optimizer.state_dict()
                 for i, group in enumerate(optim_state['param_groups']):
                     logger.add_scalar(f'Learning_Rate/Group_{i}', group['lr'], epoch)

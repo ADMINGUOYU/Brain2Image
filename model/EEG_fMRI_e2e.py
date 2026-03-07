@@ -193,7 +193,7 @@ class EEG_fMRI_E2E(nn.Module):
             epoch, num_epochs: for temperature annealing
             perm, betas, select: MixCo parameters (None if no MixCo)
         Returns:
-            dict of losses: total, align, prior, clip, blur, mse, infonce, proto
+            dict of losses: total, align, prior, clip, blur, mse, infonce, proto, backbone_sim
         """
 
         # 1. Multi-subject fMRI alignment loss computation
@@ -265,6 +265,10 @@ class EEG_fMRI_E2E(nn.Module):
             image_embed=clip_target,
         )
 
+        # !!! NOTE: new cosine similarity 'backbone_sim' between backbone and clip_target
+        # !!! for monitoring only (not used in loss) !!!
+        backbone_sim = F.cosine_similarity(backbone.flatten(1), clip_target.flatten(1), dim = -1).mean()
+
         # 3. CLIP contrastive loss
         clip_voxels = gen_outputs['clip_voxels']  # (B, 256, 1664)
         # !!! FIXED: REMEMBER TO NORMALIZE BEFORE CONTRASTIVE LOSS !!!
@@ -314,6 +318,7 @@ class EEG_fMRI_E2E(nn.Module):
             'mse': mse_loss,
             'infonce': infonce_loss,
             'proto': proto_loss,
+            'backbone_sim': backbone_sim,
         }
 
     def save_model(self, path: str):
