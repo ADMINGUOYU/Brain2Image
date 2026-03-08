@@ -165,7 +165,7 @@ def train(model: EEG_fMRI_E2E,
         use_mixco = (epoch < int(mixup_pct * num_epochs))
 
         # Accumulate losses
-        accum = {k: [] for k in ['total', 'align', 'prior', 'clip', 'blur', 'mse', 'infonce', 'proto']}
+        accum = {k: [] for k in ['total', 'align', 'prior', 'clip', 'blur', 'mse', 'infonce', 'proto', 'backbone_sim']}
 
         for batch in tqdm(data_loader['train'], desc=f"Epoch {epoch+1}/{num_epochs}", disable=(local_rank != 0)):
             (EEG, nsd_data_list, label, _, _, _, _, _,
