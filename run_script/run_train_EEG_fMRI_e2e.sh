@@ -6,6 +6,7 @@ CUDA=0
 EPOCHS=150
 BATCH_SIZE=64
 LR=3e-4
+WARMUP_EPOCHS=10
 WEIGHT_DECAY=5e-2
 CLIP_VALUE=1.0
 USE_AMP="true"
@@ -111,6 +112,7 @@ CMD="accelerate launch --num_processes=$NUM_GPUS --mixed_precision=fp16 -m train
     --epochs $EPOCHS \
     --batch_size $GLOBAL_BATCH_SIZE \
     --lr $LR \
+    --warmup_epochs $WARMUP_EPOCHS \
     --weight_decay $WEIGHT_DECAY \
     --clip_value $CLIP_VALUE \
     --use_amp $USE_AMP \

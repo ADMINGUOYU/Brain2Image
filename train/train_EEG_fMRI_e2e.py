@@ -68,6 +68,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--experiment_folder', type=str, default=None, help='experiment_folder: the main folder will under ./runs/experiment_folder/experiment_name_{timestamp}')
     parser.add_argument('--experiment_name', type=str, default='EEG_fMRI_e2e', help='experiment_name: the subfolder for this specific run, will be under the main experiment folder with timestamp, e.g. ./runs/experiment_folder/experiment_name_{timestamp}')
     parser.add_argument('--ckpt_interval', type=int, default=None, help='Number of epochs between saving checkpoints (default: None - save the best)')
+    parser.add_argument('--warmup_epochs', type = int, default = 0, help = 'Number of warmup epochs for learning rate scheduler')
 
     # Encoder backbone settings
     parser.add_argument('--backbone', type=str, default='CBraMod', choices=['CBraMod', 'ATMS'])
@@ -533,11 +534,12 @@ if __name__ == "__main__":
 
     total_steps = args.epochs * len(data_loader['train'])
     max_lrs = [g['lr'] for g in param_groups]
+    pct_start = args.warmup_epochs / args.epochs if args.warmup_epochs > 0 else min(2 / args.epochs, 0.1)
     scheduler = OneCycleLR(
         optimizer,
         max_lr=max_lrs,
         total_steps=total_steps,
-        pct_start=min(2 / args.epochs, 0.1),
+        pct_start=pct_start,
         final_div_factor=1000,
     )
     scheduler = accelerator.prepare(scheduler)
