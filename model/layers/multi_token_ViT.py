@@ -13,10 +13,10 @@ class MultiTokenViT(nn.Module):
     MLP output: 4096
     """
 
-    def __init__(self, 
-                 num_tokens = 4, 
-                 num_channels = 63, feature_dim = 200, 
-                 nhead = 4, num_layers = 4):
+    def __init__(self,
+                 num_tokens = 4,
+                 num_channels = 63, feature_dim = 200,
+                 nhead = 4, num_layers = 4, output_dim = 4096):
 
         """
         Args:
@@ -25,6 +25,7 @@ class MultiTokenViT(nn.Module):
             feature_dim (int): Dimensionality of the feature space (e.g., 200).
             nhead (int): Number of attention heads in the transformer.
             num_layers (int): Number of transformer encoder layers.
+            output_dim (int): Output dimension of the MLP head (default: 4096 for fMRI, 1024 for CLIP).
         """
 
         super().__init__()
@@ -53,7 +54,7 @@ class MultiTokenViT(nn.Module):
             nn.LayerNorm(mlp_input_dim),
             nn.Linear(mlp_input_dim, 2048),
             nn.GELU(),
-            nn.Linear(2048, 4096)
+            nn.Linear(2048, output_dim)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -80,6 +81,6 @@ class MultiTokenViT(nn.Module):
         x = x.reshape(batch_size, -1)  # (batch, num_tokens * feature_dim)
 
         # Pass through MLP
-        out = self.mlp.forward(x)  # (batch, 4096)
+        out = self.mlp.forward(x)  # (batch, output_dim)
 
         return out

@@ -23,7 +23,7 @@ os.environ['HF_HOME'] = 'datasets/transformers_cache'
 os.environ['HF_HUB_CACHE'] = 'datasets/transformers_cache'
 os.environ['TORCH_HOME'] = 'datasets/transformers_cache'
 # Set Hugging Face mirror (if needed)
-# os.environ["HF_ENDPOINT"] = "<MIRROR END POINT>"
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 # set proxy (if needed)
 # os.environ['NO_PROXY'] = 'huggingface.co'
 
@@ -64,10 +64,10 @@ def download_checkpoints():
         print(f"Downloading ConvNeXt-XL checkpoint...")
         os.system(f"wget -O {convnext_xl_ckpt_path} https://huggingface.co/datasets/pscotti/mindeyev2/resolve/main/convnext_xlarge_alpha0.75_fullckpt.pth?download=true")
 
-def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Callable, torch.nn.Module, torch.nn.Module, kornia.augmentation.AugmentationSequential]:
-    
+def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Callable, torch.nn.Module, torch.nn.Module, torch.nn.Module, typing.Callable, kornia.augmentation.AugmentationSequential]:
+
     """
-    Initialize OpenCLIP ViT-bigG-14, SD VAE, and ConvNeXt-XL.
+    Initialize OpenCLIP ViT-bigG-14, ViT-H-14, SD VAE, and ConvNeXt-XL.
     """
 
     # OpenCLIP ViT-bigG-14 for clip_bigG_embeddings
@@ -77,6 +77,13 @@ def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Ca
     )
     clip_bigG_model = clip_bigG_model.to(device).eval()
     clip_bigG_model.visual.output_tokens = True
+
+    # OpenCLIP ViT-H-14 for clip_H_cls_embedding
+    clip_H_model, _, clip_H_preprocess = open_clip.create_model_and_transforms(
+        'ViT-H-14', pretrained = 'laion2b_s32b_b79k',
+        cache_dir = 'datasets/transformers_cache'
+    )
+    clip_H_model = clip_H_model.to(device).eval()
 
     # Stable Diffusion VAE for vae_latents
     vae_model = AutoencoderKL(
@@ -106,7 +113,7 @@ def init_models(device: torch.device) -> typing.Tuple[torch.nn.Module, typing.Ca
         data_keys = ["input"],
     ).to(device)
 
-    return clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model, blur_augs
+    return clip_bigG_model, clip_bigG_preprocess, clip_H_model, clip_H_preprocess, vae_model, cnx_model, blur_augs
 
 def generate_embeddings(input_path: str, output_path: str) -> None:
 
@@ -123,7 +130,7 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
     print(f"Loaded {len(images_df)} images.")
 
     print("Initializing models...")
-    clip_bigG_model, clip_bigG_preprocess, vae_model, cnx_model, blur_augs = init_models(device)
+    clip_bigG_model, clip_bigG_preprocess, clip_H_model, clip_H_preprocess, vae_model, cnx_model, blur_augs = init_models(device)
 
     # Pre-compute normalization constants for ConvNeXt
     # NOTE: This is provided by MindEYE2
@@ -154,6 +161,10 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
             _, clip_bigG_tokens = clip_bigG_model.visual.forward(clip_bigG_input)
             clip_bigG_emb = clip_bigG_tokens.cpu().squeeze(0).numpy()
 
+            # OpenCLIP ViT-H-14 CLS embedding (1024 dim)
+            clip_H_input = clip_H_preprocess(image_pil).unsqueeze(0).to(device)
+            clip_H_cls = clip_H_model.encode_image(clip_H_input).cpu().squeeze(0).numpy()
+
             # Stable Diffusion VAE latent encoding
             vae_latent = vae_model.encode(2 * image_tensor_float - 1).latent_dist.mode().cpu().squeeze(0).numpy() * 0.18215
 
@@ -167,6 +178,7 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
 
         # Shape assertions
         assert clip_bigG_emb.shape == (256, 1664), f"Unexpected clip_bigG shape: {clip_bigG_emb.shape}"
+        assert clip_H_cls.shape == (1024,), f"Unexpected clip_H_cls shape: {clip_H_cls.shape}"
         assert vae_latent.shape == (4, 28, 28), f"Unexpected vae_latent shape: {vae_latent.shape}"
         assert cnx_feat.shape == (49, 512), f"Unexpected cnx_features shape: {cnx_feat.shape}"
         assert cnx_blurry_feat.shape == (49, 512), f"Unexpected cnx_blurry_features shape: {cnx_blurry_feat.shape}"
@@ -175,6 +187,7 @@ def generate_embeddings(input_path: str, output_path: str) -> None:
         emb_records.append({
             'image_index': image_index,
             'clip_bigG_embeddings': clip_bigG_emb,
+            'clip_H_cls_embedding': clip_H_cls,
             'vae_latents': vae_latent,
             'cnx_features': cnx_feat,
             'cnx_blurry_features': cnx_blurry_feat,

@@ -29,7 +29,13 @@
       "Bash(identify /mnt/afs/250010218/Brain2Image/runs/Mar04_EEGE2E/subj-01-wME2-ckpt_1772638509/inference-epoch100/images/test_sample_00000_orig.png 2>/dev/null || echo \"ImageMagick not available\")",
       "Bash(python -c \"from skimage.metrics import structural_similarity; print\\('skimage OK'\\)\" 2>&1 | head -3)",
       "Bash(python -c \"from torchvision.models.feature_extraction import create_feature_extractor; print\\('feature_extraction OK'\\)\" 2>&1 | head -3)",
-      "Bash(python -c \"import scipy.spatial.distance; print\\('scipy OK'\\)\" 2>&1 | head -3)"
+      "Bash(python -c \"import scipy.spatial.distance; print\\('scipy OK'\\)\" 2>&1 | head -3)",
+      "Bash(ls:*)",
+      "Bash(python:*)",
+      "Bash(conda run:*)",
+      "Bash(source activate:*)",
+      "Bash(/mnt/afs/250010218/Brain2Image/.conda/bin/python -c \"import open_clip; pretrained = open_clip.list_pretrained\\(\\); vith = [p for p in pretrained if 'ViT-H-14' in p[0]]; print\\(vith\\)\" 2>/dev/null || ls /mnt/afs/250010218/Brain2Image/.conda/bin/python 2>/dev/null || echo \"No conda python found\")",
+      "Bash(chmod:*)"
     ]
   }
 }
