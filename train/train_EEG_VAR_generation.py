@@ -12,7 +12,6 @@ Key features:
 """
 
 import os
-import sys
 import argparse
 import time
 from datetime import datetime
@@ -20,7 +19,6 @@ import json
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
@@ -200,22 +198,85 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args, writer, 
             avg_loss = total_loss / (batch_idx + 1)
             lr = optimizer.param_groups[0]['lr']
             elapsed = time.time() - start_time
+
+            # Compute per-scale metrics
+            per_scale_losses, per_scale_accs = model.compute_per_scale_metrics(
+                logits_BLV, gt_idx_Bl, label_smoothing=args.label_smoothing
+            )
+
+            # Compute top-k accuracies
+            top5_acc = model.compute_topk_accuracy(logits_BLV, gt_idx_Bl, k=5)
+
+            # Compute global token-level accuracy
+            gt_BL = torch.cat(gt_idx_Bl, dim=1)
+            pred_BL = torch.argmax(logits_BLV, dim=-1)
+            # Slice pred_BL to only keep the generated image tokens (ignore prefix)
+            pred_BL_tokens = pred_BL[:, -gt_BL.shape[1]:]
+            global_acc = (pred_BL_tokens == gt_BL).float().mean().item()
+
+            # Compute scale-mean accuracy
+            scale_mean_acc = sum(per_scale_accs) / len(per_scale_accs)
+
+            # Compute gradient norm (using PyTorch built-in)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=float('inf')
+            ).item()
+
             print(f'Epoch {epoch} [{batch_idx}/{len(train_loader)}] '
                   f'Loss: {loss.item():.4f} (avg: {avg_loss:.4f}) '
+                  f'Acc: {global_acc:.3f} '
                   f'LR: {lr:.6f} '
                   f'Time: {elapsed:.2f}s')
 
-            writer.add_scalar('train/loss', loss.item(), global_step)
-            writer.add_scalar('train/lr', lr, global_step)
+            # TensorBoard logging
+            writer.add_scalar('Train/Loss_Total', loss.item(), global_step)
+            writer.add_scalar('Train/LR', lr, global_step)
+            writer.add_scalar('Train/Grad_Norm', total_norm, global_step)
+            writer.add_scalar('Train/Accuracy_Global_Token', global_acc, global_step)
+            writer.add_scalar('Train/Accuracy_Scale_Mean', scale_mean_acc, global_step)
+            writer.add_scalar('Train/Accuracy_Top5', top5_acc, global_step)
+
+            # Log per-scale metrics
+            patch_nums = model.var.patch_nums
+            for scale_idx, (pn, scale_loss, scale_acc) in enumerate(
+                zip(patch_nums, per_scale_losses, per_scale_accs)
+            ):
+                writer.add_scalar(
+                    f'Train/Loss_Scale{scale_idx}_{pn}x{pn}',
+                    scale_loss,
+                    global_step
+                )
+                writer.add_scalar(
+                    f'Train/Acc_Scale{scale_idx}_{pn}x{pn}',
+                    scale_acc,
+                    global_step
+                )
 
     avg_loss = total_loss / len(train_loader)
     return avg_loss, global_step
 
 
-def validate(model, val_loader, args):
-    """Validate the model."""
+def validate(model, val_loader, args, writer=None, epoch=None):
+    """Validate the model with comprehensive metrics."""
     model.eval()
     total_loss = 0.0
+
+    # Accumulate per-scale metrics
+    patch_nums = model.var.patch_nums
+    num_scales = len(patch_nums)
+    accumulated_scale_losses = [0.0] * num_scales
+    accumulated_scale_accs = [0.0] * num_scales
+
+    # Accumulate global metrics
+    total_correct_tokens = 0
+    total_tokens = 0
+    total_top5_acc = 0.0
+    total_top10_acc = 0.0
+    total_perplexity = 0.0
+    total_entropy = 0.0
+
+    num_batches = 0
 
     with torch.no_grad():
         for eeg, images, _ in val_loader:
@@ -225,12 +286,88 @@ def validate(model, val_loader, args):
             # Forward pass
             logits_BLV, gt_idx_Bl = model(eeg, images)
 
-            # Compute loss
-            loss = model.compute_loss(logits_BLV, gt_idx_Bl, label_smoothing=0.0)  # No label smoothing for validation
+            # Compute total loss
+            loss = model.compute_loss(
+                logits_BLV, gt_idx_Bl, label_smoothing=0.0
+            )
             total_loss += loss.item()
 
-    avg_loss = total_loss / len(val_loader)
-    return avg_loss
+            # Compute per-scale metrics
+            per_scale_losses, per_scale_accs = model.compute_per_scale_metrics(
+                logits_BLV, gt_idx_Bl, label_smoothing=0.0
+            )
+            for i in range(num_scales):
+                accumulated_scale_losses[i] += per_scale_losses[i]
+                accumulated_scale_accs[i] += per_scale_accs[i]
+
+            # Compute global token-level accuracy
+            gt_BL = torch.cat(gt_idx_Bl, dim=1)
+            pred_BL = torch.argmax(logits_BLV, dim=-1)
+            # Slice pred_BL to only keep the generated image tokens (ignore prefix)
+            pred_BL_tokens = pred_BL[:, -gt_BL.shape[1]:]
+            total_correct_tokens += (pred_BL_tokens == gt_BL).sum().item()
+            total_tokens += gt_BL.shape[0] * gt_BL.shape[1]
+
+            # Compute top-k accuracies
+            total_top5_acc += model.compute_topk_accuracy(
+                logits_BLV, gt_idx_Bl, k=5
+            )
+            total_top10_acc += model.compute_topk_accuracy(
+                logits_BLV, gt_idx_Bl, k=10
+            )
+
+            # Compute perplexity and entropy
+            total_perplexity += model.compute_perplexity(logits_BLV, gt_idx_Bl)
+            total_entropy += model.compute_prediction_entropy(logits_BLV)
+
+            num_batches += 1
+
+    # Compute averages
+    avg_loss = total_loss / num_batches
+    avg_scale_losses = [sl / num_batches for sl in accumulated_scale_losses]
+    avg_scale_accs = [sa / num_batches for sa in accumulated_scale_accs]
+
+    # Global token-level accuracy
+    global_token_acc = total_correct_tokens / total_tokens
+
+    # Scale-mean accuracy (unweighted average)
+    scale_mean_acc = sum(avg_scale_accs) / len(avg_scale_accs)
+
+    avg_top5_acc = total_top5_acc / num_batches
+    avg_top10_acc = total_top10_acc / num_batches
+    avg_perplexity = total_perplexity / num_batches
+    avg_entropy = total_entropy / num_batches
+
+    # Compute scale loss ratio (high-res vs low-res)
+    loss_ratio = avg_scale_losses[-1] / (avg_scale_losses[0] + 1e-10)
+
+    # TensorBoard logging
+    if writer is not None and epoch is not None:
+        writer.add_scalar('Val/Loss_Total', avg_loss, epoch)
+        writer.add_scalar('Val/Accuracy_Global_Token', global_token_acc, epoch)
+        writer.add_scalar('Val/Accuracy_Scale_Mean', scale_mean_acc, epoch)
+        writer.add_scalar('Val/Accuracy_Top5', avg_top5_acc, epoch)
+        writer.add_scalar('Val/Accuracy_Top10', avg_top10_acc, epoch)
+        writer.add_scalar('Val/Perplexity', avg_perplexity, epoch)
+        writer.add_scalar('Val/Prediction_Entropy', avg_entropy, epoch)
+        writer.add_scalar('Val/Loss_Ratio_High_vs_Low', loss_ratio, epoch)
+
+        # Log per-scale metrics
+        for scale_idx, (pn, scale_loss, scale_acc) in enumerate(
+            zip(patch_nums, avg_scale_losses, avg_scale_accs)
+        ):
+            writer.add_scalar(
+                f'Val/Loss_Scale{scale_idx}_{pn}x{pn}',
+                scale_loss,
+                epoch
+            )
+            writer.add_scalar(
+                f'Val/Acc_Scale{scale_idx}_{pn}x{pn}',
+                scale_acc,
+                epoch
+            )
+
+    return avg_loss, global_token_acc
 
 
 def main():
@@ -338,11 +475,12 @@ def main():
 
         # Validate
         if epoch % args.val_interval == 0:
-            val_loss = validate(model, val_loader, args)
-            print(f"Val loss: {val_loss:.4f}")
-            writer.add_scalar('epoch/val_loss', val_loss, epoch)
+            val_loss, val_acc = validate(
+                model, val_loader, args, writer=writer, epoch=epoch
+            )
+            print(f"Val loss: {val_loss:.4f}, Val acc (global): {val_acc:.3f}")
 
-            # Save best model
+            # Save best model based on validation loss
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 checkpoint = {

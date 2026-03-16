@@ -153,6 +153,130 @@ class EEG_VAR_Generation(nn.Module):
         loss = loss_BL.mul(self.loss_weight).sum(dim=-1).mean()
         return loss
 
+    def compute_per_scale_metrics(
+        self,
+        logits_BLV: torch.Tensor,
+        gt_idx_Bl: List[torch.Tensor],
+        label_smoothing: float = 0.0
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Compute loss and accuracy for each scale separately.
+
+        Args:
+            logits_BLV: VAR logits (B, 680, 4096)
+            gt_idx_Bl: Ground truth token indices (list of 10 tensors)
+            label_smoothing: Label smoothing factor
+
+        Returns:
+            per_scale_losses: List of 10 scalars (loss per scale)
+            per_scale_accs: List of 10 scalars (accuracy per scale)
+        """
+        B, L, V = logits_BLV.shape
+        gt_BL = torch.cat(gt_idx_Bl, dim=1)  # (B, 680)
+
+        # Compute per-token loss
+        loss_BL = F.cross_entropy(
+            logits_BLV.view(-1, V),
+            gt_BL.view(-1),
+            label_smoothing=label_smoothing,
+            reduction='none'
+        ).view(B, L)  # (B, 680)
+
+        # Compute per-token accuracy
+        pred_BL = torch.argmax(logits_BLV, dim=-1)  # (B, 680)
+        correct_BL = (pred_BL == gt_BL).float()  # (B, 680)
+
+        # Extract per-scale metrics using pre-computed boundaries
+        per_scale_losses = []
+        per_scale_accs = []
+
+        for begin, end in self.var.begin_ends:
+            # Loss: average over batch and tokens in this scale
+            scale_loss = loss_BL[:, begin:end].mean()
+            per_scale_losses.append(scale_loss.item())
+
+            # Accuracy: average over batch and tokens in this scale
+            scale_acc = correct_BL[:, begin:end].mean()
+            per_scale_accs.append(scale_acc.item())
+
+        return per_scale_losses, per_scale_accs
+
+    def compute_topk_accuracy(
+        self,
+        logits_BLV: torch.Tensor,
+        gt_idx_Bl: List[torch.Tensor],
+        k: int = 5
+    ) -> float:
+        """
+        Compute top-k accuracy (whether correct token is in top-k predictions).
+
+        Args:
+            logits_BLV: VAR logits (B, 680, 4096)
+            gt_idx_Bl: Ground truth token indices
+            k: Top-k value
+
+        Returns:
+            topk_acc: Top-k accuracy
+        """
+        B, L, V = logits_BLV.shape
+        gt_BL = torch.cat(gt_idx_Bl, dim=1)  # (B, 680)
+
+        # Get top-k predictions
+        topk_preds = torch.topk(logits_BLV, k=k, dim=-1).indices  # (B, 680, k)
+
+        # Check if GT is in top-k
+        gt_expanded = gt_BL.unsqueeze(-1)  # (B, 680, 1)
+        correct = (topk_preds == gt_expanded).any(dim=-1).float()  # (B, 680)
+
+        return correct.mean().item()
+
+    def compute_perplexity(
+        self,
+        logits_BLV: torch.Tensor,
+        gt_idx_Bl: List[torch.Tensor]
+    ) -> float:
+        """
+        Compute perplexity = exp(cross_entropy).
+        Lower perplexity indicates better model confidence.
+
+        Args:
+            logits_BLV: VAR logits (B, 680, 4096)
+            gt_idx_Bl: Ground truth token indices
+
+        Returns:
+            perplexity: Perplexity value
+        """
+        loss = self.compute_loss(logits_BLV, gt_idx_Bl, label_smoothing=0.0)
+        return torch.exp(loss).item()
+
+    def compute_prediction_entropy(
+        self,
+        logits_BLV: torch.Tensor
+    ) -> float:
+        """
+        Compute normalized prediction entropy (range [0, 1]).
+
+        - Value near 0: Model is confident (potential mode collapse)
+        - Value near 1: Model is uncertain (random guessing)
+
+        Args:
+            logits_BLV: VAR logits (B, 680, 4096)
+
+        Returns:
+            normalized_entropy: Entropy normalized by log(vocab_size)
+        """
+        import math
+
+        V = logits_BLV.size(-1)
+        probs = F.softmax(logits_BLV, dim=-1)  # (B, 680, 4096)
+        entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)  # (B, 680)
+
+        # Normalize by maximum possible entropy: log(V)
+        max_entropy = math.log(V)
+        normalized_entropy = entropy.mean().item() / max_entropy
+
+        return normalized_entropy
+
     def generate(
         self,
         eeg: torch.Tensor,
