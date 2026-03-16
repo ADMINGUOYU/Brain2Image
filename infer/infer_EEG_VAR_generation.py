@@ -3,6 +3,7 @@ EEG-VAR Generation Inference Script
 
 Generate images from EEG using trained VAR model.
 Supports classifier-free guidance and various sampling strategies.
+Includes integrated evaluation metrics computation.
 """
 
 import os
@@ -17,9 +18,18 @@ from torch.utils.data import DataLoader
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
+from torchvision import transforms
+import scipy as sp
 
 from model.EEG_VAR_generation import EEG_VAR_Generation
 from data.EEG_VAR_generation_dataset import EEG_VAR_Generation_Dataset
+
+# Import evaluation functions
+from eval.evaluate_reconstruction import (
+    compute_pixcorr, compute_ssim, compute_alexnet_metrics,
+    compute_inception_metric, compute_clip_metric,
+    compute_effnet_metric, compute_swav_metric
+)
 
 
 def parse_args():
@@ -64,6 +74,12 @@ def parse_args():
                         help='Random seed')
     parser.add_argument('--max_samples', type=int, default=None,
                         help='Maximum number of samples to process')
+
+    # Evaluation
+    parser.add_argument('--skip_eval', type=lambda x: x.lower() == 'true', default=False,
+                        help='Skip evaluation metrics computation (only generate images)')
+    parser.add_argument('--eval_batch_size', type=int, default=40,
+                        help='Batch size for evaluation model forward passes')
 
     # Device
     parser.add_argument('--device', type=str, default='cuda',
@@ -210,17 +226,17 @@ def main():
 
             # Save images
             for i in range(gen_images.shape[0]):
-                # Save generated image
+                # Save generated image (recon)
                 save_image(
                     gen_images[i],
-                    os.path.join(args.output_dir, 'images', f'{sample_idx:05d}_gen.png')
+                    os.path.join(args.output_dir, 'images', f'{args.split}_sample_{sample_idx:05d}_recon.png')
                 )
 
-                # Save ground truth image (denormalize from [-1, 1] to [0, 1])
+                # Save ground truth image (orig) - denormalize from [-1, 1] to [0, 1]
                 gt_img = (gt_images[i] + 1) / 2
                 save_image(
                     gt_img,
-                    os.path.join(args.output_dir, 'images', f'{sample_idx:05d}_gt.png')
+                    os.path.join(args.output_dir, 'images', f'{args.split}_sample_{sample_idx:05d}_orig.png')
                 )
 
                 sample_idx += 1
@@ -229,18 +245,124 @@ def main():
     print(f"Generated {sample_idx} images")
     print(f"Output directory: {args.output_dir}")
 
-    # Save generation config
-    gen_config = {
-        'checkpoint': args.checkpoint,
-        'split': args.split,
-        'cfg_scale': args.cfg_scale,
-        'top_k': args.top_k,
-        'top_p': args.top_p,
-        'seed': args.seed,
-        'num_samples': sample_idx
+    # Prepare results dictionary with generation config
+    results = {
+        'generation_config': {
+            'checkpoint': args.checkpoint,
+            'split': args.split,
+            'cfg_scale': args.cfg_scale,
+            'top_k': args.top_k,
+            'top_p': args.top_p,
+            'seed': args.seed,
+            'num_samples': sample_idx,
+            'eeg_encoder_type': args.eeg_encoder_type,
+            'var_depth': args.var_depth,
+        }
     }
-    with open(os.path.join(args.output_dir, 'generation_config.json'), 'w') as f:
-        json.dump(gen_config, f, indent=2)
+
+    # Compute evaluation metrics if not skipped
+    if not args.skip_eval:
+        print("\n" + "=" * 60)
+        print("Computing evaluation metrics...")
+        print("=" * 60)
+
+        # Load all generated images back as tensors
+        images_dir = os.path.join(args.output_dir, 'images')
+        to_tensor = transforms.Compose([
+            transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.ToTensor(),
+        ])
+
+        all_orig = []
+        all_recon = []
+        for idx in tqdm(range(sample_idx), desc="Loading images for evaluation"):
+            orig_path = os.path.join(images_dir, f'{args.split}_sample_{idx:05d}_orig.png')
+            recon_path = os.path.join(images_dir, f'{args.split}_sample_{idx:05d}_recon.png')
+
+            orig_img = Image.open(orig_path).convert('RGB')
+            recon_img = Image.open(recon_path).convert('RGB')
+
+            all_orig.append(to_tensor(orig_img))
+            all_recon.append(to_tensor(recon_img))
+
+        all_orig = torch.stack(all_orig, dim=0)    # (N, 3, 256, 256)
+        all_recon = torch.stack(all_recon, dim=0)  # (N, 3, 256, 256)
+
+        print(f"Loaded {len(all_orig)} image pairs for evaluation")
+
+        # Compute metrics
+        metrics = {}
+        device = torch.device(args.device)
+
+        print("\n--- PixCorr ---")
+        metrics['PixCorr'] = compute_pixcorr(all_orig, all_recon)
+        print(f"  {metrics['PixCorr']:.6f}")
+
+        print("\n--- SSIM ---")
+        metrics['SSIM'] = compute_ssim(all_orig, all_recon)
+        print(f"  {metrics['SSIM']:.6f}")
+
+        print("\n--- AlexNet(2) & AlexNet(5) ---")
+        a2, a5 = compute_alexnet_metrics(all_orig, all_recon, device, args.eval_batch_size)
+        metrics['AlexNet(2)'] = a2
+        metrics['AlexNet(5)'] = a5
+        print(f"  AlexNet(2): {a2:.6f}")
+        print(f"  AlexNet(5): {a5:.6f}")
+
+        print("\n--- InceptionV3 ---")
+        metrics['InceptionV3'] = compute_inception_metric(all_orig, all_recon, device, args.eval_batch_size)
+        print(f"  {metrics['InceptionV3']:.6f}")
+
+        print("\n--- CLIP (ViT-L/14, image 2-way) ---")
+        metrics['CLIP'] = compute_clip_metric(all_orig, all_recon, device, args.eval_batch_size)
+        print(f"  {metrics['CLIP']:.6f}")
+
+        print("\n--- EffNet-B ---")
+        metrics['EffNet-B'] = compute_effnet_metric(all_orig, all_recon, device, args.eval_batch_size)
+        print(f"  {metrics['EffNet-B']:.6f}  (distance, lower = better)")
+
+        print("\n--- SwAV ---")
+        metrics['SwAV'] = compute_swav_metric(all_orig, all_recon, device, args.eval_batch_size)
+        print(f"  {metrics['SwAV']:.6f}  (distance, lower = better)")
+
+        # Add metrics to results
+        results['metrics'] = {k: float(v) for k, v in metrics.items()}
+        results['metric_notes'] = {
+            'PixCorr': 'higher is better',
+            'SSIM': 'higher is better',
+            'AlexNet(2)': '2-way identification, higher is better',
+            'AlexNet(5)': '2-way identification, higher is better',
+            'InceptionV3': '2-way identification, higher is better',
+            'CLIP': '2-way identification (image features), higher is better',
+            'EffNet-B': 'correlation distance, lower is better',
+            'SwAV': 'correlation distance, lower is better',
+        }
+
+        # Print summary table
+        print("\n" + "=" * 60)
+        print(f"{'Metric':<20} {'Value':>15}  {'Direction':>15}")
+        print("-" * 60)
+        directions = {
+            'PixCorr': 'higher↑', 'SSIM': 'higher↑',
+            'AlexNet(2)': 'higher↑', 'AlexNet(5)': 'higher↑',
+            'InceptionV3': 'higher↑', 'CLIP': 'higher↑',
+            'EffNet-B': 'lower↓', 'SwAV': 'lower↓',
+        }
+        for k, v in metrics.items():
+            print(f"{k:<20} {v:>15.6f}  {directions[k]:>15}")
+        print("=" * 60)
+
+    # Save unified results JSON
+    results_path = os.path.join(args.output_dir, 'results.json')
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"\nSaved results -> {results_path}")
+
+    # Also save generation config separately for backward compatibility
+    gen_config_path = os.path.join(args.output_dir, 'generation_config.json')
+    with open(gen_config_path, 'w') as f:
+        json.dump(results['generation_config'], f, indent=2)
+    print(f"Saved generation config -> {gen_config_path}")
 
 
 if __name__ == '__main__':

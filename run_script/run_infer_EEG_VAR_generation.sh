@@ -2,6 +2,8 @@
 
 # EEG-VAR Generation Inference Script
 # Generate images from EEG using trained VAR model
+# NOTE: Evaluation metrics are computed automatically after generation.
+#       Use --skip_eval true to disable evaluation (faster, images only).
 
 # Trained model checkpoint
 # Update this path to your trained checkpoint
@@ -38,6 +40,10 @@ TOP_P=0.95
 SEED=42
 MAX_SAMPLES=100  # Set to null to process all samples
 
+# Evaluation config
+SKIP_EVAL=false  # Set to true to skip evaluation (faster, images only)
+EVAL_BATCH_SIZE=40  # Batch size for evaluation model forward passes
+
 # Output directory
 OUTPUT_DIR="runs/EEG_VAR_generation_<timestamp>/inference"
 
@@ -58,5 +64,7 @@ python -m infer.infer_EEG_VAR_generation \
     --top_p $TOP_P \
     --seed $SEED \
     --max_samples $MAX_SAMPLES \
+    --skip_eval $SKIP_EVAL \
+    --eval_batch_size $EVAL_BATCH_SIZE \
     --output_dir $OUTPUT_DIR \
     --device cuda
