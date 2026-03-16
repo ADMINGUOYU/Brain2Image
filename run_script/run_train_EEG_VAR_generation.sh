@@ -5,7 +5,7 @@
 
 # Stage 1 checkpoint (from EEG-CLIP alignment training)
 # Update this path to your trained stage 1 checkpoint
-STAGE1_CKPT="runs/EEG_CLIP_align_1773640336/checkpoints/best_model_epoch_38.pth"
+STAGE1_CKPT="runs/EEG_CLIP_align_1773643388/checkpoints/best_model_epoch_93.pth"
 
 # Subject configuration
 THINGS_SUBJECT="sub-08"

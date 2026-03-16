@@ -7,10 +7,13 @@
 
 # Trained model checkpoint
 # Update this path to your trained checkpoint
-CHECKPOINT="runs/EEG_VAR_generation_<timestamp>/checkpoints/best_model.pth"
+CHECKPOINT="runs/EEG_VAR_generation_CBraMod_d16_20260316_163820/checkpoints/best_model.pth"
+
+# Extract experiment directory from checkpoint path
+EXPERIMENT_DIR="${CHECKPOINT%/checkpoints/*}"
 
 # Stage 1 checkpoint (same as used in training)
-STAGE1_CKPT="runs/EEG_CLIP_align_<timestamp>/checkpoints/best_model.pth"
+STAGE1_CKPT="runs/EEG_CLIP_align_1773643388/checkpoints/best_model_epoch_93.pth"
 
 # Subject configuration
 THINGS_SUBJECT="sub-08"
@@ -27,9 +30,9 @@ fi
 H5_PATH="datasets/processed/things_images_only.h5"
 
 # Pre-trained checkpoints
-VAE_CKPT="pretrained/vae_ch160v4096z32.pth"
+VAE_CKPT="datasets/pretrain_weights/vae_ch160v4096z32.pth"
 VAR_DEPTH=16
-VAR_CKPT="pretrained/var_d${VAR_DEPTH}.pth"
+VAR_CKPT="datasets/pretrain_weights/var_d${VAR_DEPTH}.pth"
 
 # Inference config
 SPLIT="test"
@@ -44,8 +47,8 @@ MAX_SAMPLES=100  # Set to null to process all samples
 SKIP_EVAL=false  # Set to true to skip evaluation (faster, images only)
 EVAL_BATCH_SIZE=40  # Batch size for evaluation model forward passes
 
-# Output directory
-OUTPUT_DIR="runs/EEG_VAR_generation_<timestamp>/inference"
+# Output directory (saved in same directory as checkpoint)
+OUTPUT_DIR="${EXPERIMENT_DIR}/infer"
 
 # Execute inference
 python -m infer.infer_EEG_VAR_generation \
