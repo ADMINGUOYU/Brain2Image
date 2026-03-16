@@ -109,6 +109,11 @@ def get_stage1_config(eeg_encoder_type: str) -> dict:
 
 def get_var_config(depth: int) -> dict:
     """Get VAR model configuration."""
+    # Follow AVDE's drop_path_rate calculation: dpr = 0.1 * depth / 24
+    # This provides depth-adaptive stochastic depth regularization
+    # Examples: depth=16 -> 0.0667, depth=24 -> 0.1, depth=30 -> 0.125
+    drop_path_rate = 0.1 * depth / 24
+
     return {
         'depth': depth,
         'embed_dim': 1024,
@@ -116,7 +121,7 @@ def get_var_config(depth: int) -> dict:
         'mlp_ratio': 4.0,
         'drop_rate': 0.0,
         'attn_drop_rate': 0.0,
-        'drop_path_rate': 0.0,
+        'drop_path_rate': drop_path_rate,  # Dynamic calculation based on depth
         'norm_eps': 1e-6,
         'shared_aln': False,
         'cond_drop_rate': 0.1,  # CFG dropout
