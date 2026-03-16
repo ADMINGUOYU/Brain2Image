@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
+import numpy as np
 
 from .encoders.cbramod_eeg_encoder import CBraMod_EEG_Encoder
 from .encoders.atms_eeg_encoder import ATMS_EEG_Encoder
@@ -107,7 +108,7 @@ class EEG_CLIP_Align(nn.Module):
         loss_cfg = param.get('Loss', {})
         self.mse_scale      = loss_cfg.get('mse_scale',      1.0)
         self.infonce_scale  = loss_cfg.get('infonce_scale',   1.0)
-        self.temperature    = loss_cfg.get('temperature',     0.07)
+        self.logit_scale    = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.normalize_clip = loss_cfg.get('normalize_clip',  True)
 
     def forward(self, eeg_input: torch.Tensor) -> torch.Tensor:
@@ -156,9 +157,19 @@ class EEG_CLIP_Align(nn.Module):
 
         mse_loss = F.mse_loss(aligned_embeds, target_embeds, reduction='none').sum(dim=1).mean()
 
-        logits = aligned_embeds @ target_embeds.T / self.temperature
+        # Bidirectional InfoNCE loss
+        logit_scale = self.logit_scale.exp()
+        logits = logit_scale * (aligned_embeds @ target_embeds.T)
         labels = torch.arange(aligned_embeds.size(0), device=aligned_embeds.device)
-        infonce_loss = F.cross_entropy(logits, labels)
+
+        # EEG→CLIP direction
+        loss_eeg_to_clip = F.cross_entropy(logits, labels)
+
+        # CLIP→EEG direction (transpose logits)
+        loss_clip_to_eeg = F.cross_entropy(logits.T, labels)
+
+        # Symmetric average
+        infonce_loss = 0.5 * (loss_eeg_to_clip + loss_clip_to_eeg)
 
         total_loss = self.mse_scale * mse_loss + self.infonce_scale * infonce_loss
         return total_loss, mse_loss, infonce_loss
@@ -199,7 +210,6 @@ class EEG_CLIP_Align(nn.Module):
         parameters = {
             'mse_scale':      self.mse_scale,
             'infonce_scale':  self.infonce_scale,
-            'temperature':    self.temperature,
             'normalize_clip': self.normalize_clip,
             'EEG_Encoder_type': type(self.eeg_encoder).__name__,
         }
@@ -225,7 +235,6 @@ class EEG_CLIP_Align(nn.Module):
                     current_state[k].copy_(v)
         self.mse_scale      = loaded['parameters']['mse_scale']
         self.infonce_scale  = loaded['parameters']['infonce_scale']
-        self.temperature    = loaded['parameters']['temperature']
         self.normalize_clip = loaded['parameters']['normalize_clip']
 
 

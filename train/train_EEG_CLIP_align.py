@@ -1,7 +1,7 @@
 # Training code for EEG-CLIP alignment
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import argparse
@@ -24,6 +24,10 @@ def get_args() -> argparse.Namespace:
     parser.add_argument('--batch_size',        type=int,   default=64)
     parser.add_argument('--lr',                type=float, default=1e-4)
     parser.add_argument('--multi_lr',          type=lambda x: x.lower() == 'true', default=True)
+    parser.add_argument('--backbone_lr_scale', type=float, default=0.2,
+                        help='LR multiplier for eeg_encoder.backbone when multi_lr=True')
+    parser.add_argument('--warmup_epochs',     type=int,   default=0,
+                        help='Number of linear warmup epochs before cosine annealing')
     parser.add_argument('--weight_decay',      type=float, default=5e-2)
     parser.add_argument('--optimizer',         type=str,   default='AdamW')
     parser.add_argument('--clip_value',        type=float, default=1.0)
@@ -68,7 +72,6 @@ def get_args() -> argparse.Namespace:
     # Loss hyperparameters
     parser.add_argument('--mse_scale',     type=float, default=1.0)
     parser.add_argument('--infonce_scale', type=float, default=0.2)
-    parser.add_argument('--temperature',   type=float, default=0.1)
     parser.add_argument('--normalize_clip',
                         type=lambda x: x.lower() == 'true', default=True)
 
@@ -300,7 +303,6 @@ if __name__ == "__main__":
         'Loss': {
             'mse_scale':      args.mse_scale,
             'infonce_scale':  args.infonce_scale,
-            'temperature':    args.temperature,
             'normalize_clip': args.normalize_clip,
         },
     }
@@ -329,14 +331,23 @@ if __name__ == "__main__":
 
     if args.multi_lr:
         optimizer = optimizer_class([
-            {'params': backbone_params, 'lr': args.lr * 0.2},  # Pretrained backbone: lower LR
-            {'params': other_params,    'lr': args.lr},        # Projection head: full LR
+            {'params': backbone_params, 'lr': args.lr * args.backbone_lr_scale},  # Pretrained backbone: lower LR
+            {'params': other_params,    'lr': args.lr},                            # Projection head: full LR
         ], weight_decay=args.weight_decay)
     else:
         optimizer = optimizer_class(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    total_steps = args.epochs * len(data_loader['train'])
-    scheduler   = CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=1e-6)
+    total_steps  = args.epochs * len(data_loader['train'])
+    warmup_steps = args.warmup_epochs * len(data_loader['train'])
+    cosine_steps = total_steps - warmup_steps
+
+    if warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=1e-2, end_factor=1.0, total_iters=warmup_steps)
+        cosine_scheduler  = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=1e-6)
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler],
+                                 milestones=[warmup_steps])
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=1e-6)
 
     # ── Train + Test ──────────────────────────────────────────────────────────
     train(model, data_loader, optimizer, scheduler, device,

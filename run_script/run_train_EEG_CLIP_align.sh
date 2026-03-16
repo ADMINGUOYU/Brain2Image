@@ -23,7 +23,9 @@ CUDA=0                      # GPU device ID
 EPOCHS=100                  # Number of training epochs
 BATCH_SIZE=64               # Batch size for training
 LR=1e-4                     # Base learning rate
-MULTI_LR="true"             # Use differential learning rates (backbone: 0.2x, head: 1.0x)
+MULTI_LR="true"             # Use differential learning rates (backbone: BACKBONE_LR_SCALE x, head: 1.0x)
+BACKBONE_LR_SCALE=0.2       # LR multiplier for eeg_encoder.backbone when MULTI_LR=true
+WARMUP_EPOCHS=10            # Linear warmup epochs before cosine annealing (0 = no warmup)
 WEIGHT_DECAY=5e-2           # Weight decay for AdamW optimizer
 OPTIMIZER="AdamW"           # Optimizer type
 CLIP_VALUE=1.0              # Gradient clipping value
@@ -138,6 +140,8 @@ CMD="python -m train.train_EEG_CLIP_align \
     --batch_size $BATCH_SIZE \
     --lr $LR \
     --multi_lr $MULTI_LR \
+    --backbone_lr_scale $BACKBONE_LR_SCALE \
+    --warmup_epochs $WARMUP_EPOCHS \
     --weight_decay $WEIGHT_DECAY \
     --optimizer $OPTIMIZER \
     --clip_value $CLIP_VALUE \
@@ -162,7 +166,6 @@ CMD="python -m train.train_EEG_CLIP_align \
     --atms_factor $ATMS_FACTOR \
     --mse_scale $MSE_SCALE \
     --infonce_scale $INFONCE_SCALE \
-    --temperature $TEMPERATURE \
     --normalize_clip $NORMALIZE_CLIP \
     --script_path $0"
 
