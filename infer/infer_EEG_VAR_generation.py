@@ -200,8 +200,18 @@ def main():
     # Load trained checkpoint
     print(f"Loading checkpoint from {args.checkpoint}")
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
+
+    # Load VAR weights
     model.var.load_state_dict(checkpoint['var_state_dict'])
-    print(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
+    print(f"Loaded VAR checkpoint from epoch {checkpoint['epoch']}")
+
+    # Check if checkpoint contains fine-tuned EEG encoder weights
+    if 'eeg_clip_state_dict' in checkpoint:
+        print("Found fine-tuned EEG encoder weights in checkpoint, loading...")
+        model.eeg_clip_model.load_state_dict(checkpoint['eeg_clip_state_dict'])
+        print("✓ Using fine-tuned EEG encoder from stage 2 checkpoint")
+    else:
+        print("✓ Using frozen EEG encoder from stage 1 checkpoint (original)")
 
     model = model.to(args.device)
     model.eval()

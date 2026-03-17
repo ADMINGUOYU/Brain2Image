@@ -35,19 +35,26 @@ class EEG_VAR_Generation(nn.Module):
         vae_ckpt_path: str,
         var_ckpt_path: str,
         var_config: dict,
+        freeze_eeg_encoder: bool = True,
         device: str = 'cuda'
     ):
         super().__init__()
         self.device = device
 
-        # 1. Load frozen stage 1 model (EEG-CLIP alignment)
+        # 1. Load stage 1 model (EEG-CLIP alignment)
         print(f"Loading stage 1 model from {stage1_ckpt_path}")
         self.eeg_clip_model = EEG_CLIP_Align(stage1_config)
         self.eeg_clip_model.load_model(stage1_ckpt_path, device)
-        self.eeg_clip_model.eval()
-        for p in self.eeg_clip_model.parameters():
-            p.requires_grad = False
-        print("Stage 1 model loaded and frozen")
+
+        # Conditionally freeze EEG encoder
+        if freeze_eeg_encoder:
+            for p in self.eeg_clip_model.parameters():
+                p.requires_grad = False
+            print("Stage 1 model loaded and frozen")
+        else:
+            for p in self.eeg_clip_model.parameters():
+                p.requires_grad = True
+            print("Stage 1 model loaded (unfrozen, trainable)")
 
         # 2. Load frozen VQVAE
         print(f"Loading VQVAE from {vae_ckpt_path}")

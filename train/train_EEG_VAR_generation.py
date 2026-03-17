@@ -64,6 +64,19 @@ def parse_args():
                         help='Label smoothing factor')
     parser.add_argument('--grad_clip', type=float, default=1.0,
                         help='Gradient clipping norm')
+    parser.add_argument('--freeze_eeg_encoder',
+                        type=lambda x: x.lower() == 'true',
+                        default=True,
+                        help='Freeze EEG encoder (stage 1) during training (default: True)')
+    parser.add_argument('--eeg_encoder_lr_scale',
+                        type=float,
+                        default=0.1,
+                        help='LR multiplier for EEG encoder when unfrozen (default: 0.1)')
+    parser.add_argument('--unfrozen_eeg_mode',
+                        type=str,
+                        default='eval',
+                        choices=['eval', 'train'],
+                        help='Mode for unfrozen EEG encoder: "eval" (partial fine-tuning, BN/Dropout frozen) or "train" (full fine-tuning, BN/Dropout active). Only applies when freeze_eeg_encoder=False. Default: eval (recommended)')
 
     # Data loading
     parser.add_argument('--num_workers', type=int, default=8,
@@ -135,21 +148,51 @@ def get_var_config(depth: int) -> dict:
     }
 
 
-def create_optimizer(model: nn.Module, lr: float, weight_decay: float):
-    """Create optimizer with weight decay exclusions."""
+def create_optimizer(model: nn.Module, args):
+    """Create optimizer with weight decay exclusions and differential LR."""
     # Exclude bias and LayerNorm parameters from weight decay
     no_decay = ['bias', 'LayerNorm.weight', 'LayerNorm.bias', 'norm.weight', 'norm.bias']
-    optimizer_grouped_parameters = [
-        {
-            'params': [p for n, p in model.var.named_parameters() if not any(nd in n for nd in no_decay)],
-            'weight_decay': weight_decay
-        },
-        {
-            'params': [p for n, p in model.var.named_parameters() if any(nd in n for nd in no_decay)],
-            'weight_decay': 0.0
-        }
-    ]
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=lr, betas=(0.9, 0.95))
+
+    if args.freeze_eeg_encoder:
+        # Only optimize VAR parameters
+        optimizer_grouped_parameters = [
+            {
+                'params': [p for n, p in model.var.named_parameters() if not any(nd in n for nd in no_decay)],
+                'weight_decay': args.weight_decay
+            },
+            {
+                'params': [p for n, p in model.var.named_parameters() if any(nd in n for nd in no_decay)],
+                'weight_decay': 0.0
+            }
+        ]
+    else:
+        # Optimize both VAR and EEG encoder with differential LR
+        eeg_lr = args.lr * args.eeg_encoder_lr_scale
+        print(f"VAR LR: {args.lr:.2e}, EEG encoder LR: {eeg_lr:.2e} (scale: {args.eeg_encoder_lr_scale})")
+        optimizer_grouped_parameters = [
+            {
+                'params': [p for n, p in model.var.named_parameters() if not any(nd in n for nd in no_decay)],
+                'lr': args.lr,
+                'weight_decay': args.weight_decay
+            },
+            {
+                'params': [p for n, p in model.var.named_parameters() if any(nd in n for nd in no_decay)],
+                'lr': args.lr,
+                'weight_decay': 0.0
+            },
+            {
+                'params': [p for n, p in model.eeg_clip_model.named_parameters() if not any(nd in n for nd in no_decay)],
+                'lr': eeg_lr,
+                'weight_decay': args.weight_decay
+            },
+            {
+                'params': [p for n, p in model.eeg_clip_model.named_parameters() if any(nd in n for nd in no_decay)],
+                'lr': eeg_lr,
+                'weight_decay': 0.0
+            }
+        ]
+
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, betas=(0.9, 0.95))
     return optimizer
 
 
@@ -169,7 +212,24 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args, writer, 
     """Train for one epoch."""
     model.train()
     model.var.train()  # Ensure VAR is in training mode
-    model.eeg_clip_model.eval()  # Keep stage 1 frozen
+
+    # Control EEG encoder state based on freeze_eeg_encoder and unfrozen_eeg_mode
+    if args.freeze_eeg_encoder:
+        # Fully frozen: no gradients, eval mode
+        model.eeg_clip_model.eval()
+    else:
+        # Unfrozen: gradients enabled, but mode depends on unfrozen_eeg_mode
+        if args.unfrozen_eeg_mode == 'eval':
+            # Partial fine-tuning: update weights but keep BN/Dropout frozen
+            model.eeg_clip_model.eval()
+            if epoch == 1:  # Only print once
+                print(f"EEG encoder in EVAL mode (partial fine-tuning: weights updated, BN/Dropout frozen)")
+        else:  # 'train'
+            # Full fine-tuning: update weights AND BN/Dropout statistics
+            model.eeg_clip_model.train()
+            if epoch == 1:  # Only print once
+                print(f"EEG encoder in TRAIN mode (full fine-tuning: weights + BN/Dropout updated)")
+
     model.vae.eval()  # Keep VQVAE frozen
 
     total_loss = 0.0
@@ -444,6 +504,7 @@ def main():
         vae_ckpt_path=args.vae_ckpt,
         var_ckpt_path=args.var_ckpt,
         var_config=var_config,
+        freeze_eeg_encoder=args.freeze_eeg_encoder,
         device=args.device
     )
     model = model.to(args.device)
@@ -455,7 +516,7 @@ def main():
     print(f"Trainable parameters (VAR only): {trainable_params:,}")
 
     # Create optimizer and scheduler
-    optimizer = create_optimizer(model, args.lr, args.weight_decay)
+    optimizer = create_optimizer(model, args)
     num_training_steps = len(train_loader) * args.epochs
     warmup_steps = len(train_loader) * args.warmup_epochs
     scheduler = create_scheduler(optimizer, num_training_steps, warmup_steps)
@@ -496,8 +557,14 @@ def main():
                     'val_loss': val_loss,
                     'args': vars(args)
                 }
-                torch.save(checkpoint, os.path.join(output_dir, 'checkpoints', 'best_model.pth'))
-                print(f"Saved best model (val_loss: {val_loss:.4f})")
+
+                # If EEG encoder was unfrozen, save its weights too
+                if not args.freeze_eeg_encoder:
+                    checkpoint['eeg_clip_state_dict'] = model.eeg_clip_model.state_dict()
+                    print("Saved fine-tuned EEG encoder weights to checkpoint")
+
+                torch.save(checkpoint, os.path.join(output_dir, 'checkpoints', f'best_model_epoch_{epoch}.pth'))
+                print(f"Saved best model at epoch {epoch} (val_loss: {val_loss:.4f})")
 
         # Save periodic checkpoint
         if epoch % args.save_interval == 0:
@@ -509,6 +576,10 @@ def main():
                 'val_loss': val_loss if epoch % args.val_interval == 0 else None,
                 'args': vars(args)
             }
+
+            if not args.freeze_eeg_encoder:
+                checkpoint['eeg_clip_state_dict'] = model.eeg_clip_model.state_dict()
+
             torch.save(checkpoint, os.path.join(output_dir, 'checkpoints', f'checkpoint_epoch_{epoch}.pth'))
             print(f"Saved checkpoint at epoch {epoch}")
 

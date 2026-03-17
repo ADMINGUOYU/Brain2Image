@@ -34,6 +34,10 @@ WARMUP_EPOCHS=10
 WEIGHT_DECAY=0.05
 LABEL_SMOOTHING=0.1
 GRAD_CLIP=1.0
+FREEZE_EEG_ENCODER="true"       # Set to "false" to unfreeze and train EEG encoder
+EEG_ENCODER_LR_SCALE=0.1        # LR multiplier for EEG encoder when unfrozen (0.1 = 10x lower)
+UNFROZEN_EEG_MODE="eval"        # "eval" (partial fine-tuning, BN/Dropout frozen) or "train" (full fine-tuning)
+                                # Only applies when FREEZE_EEG_ENCODER="false". Default: "eval" (recommended)
 
 # Data loading
 NUM_WORKERS=8
@@ -62,6 +66,9 @@ python -m train.train_EEG_VAR_generation \
     --weight_decay $WEIGHT_DECAY \
     --label_smoothing $LABEL_SMOOTHING \
     --grad_clip $GRAD_CLIP \
+    --freeze_eeg_encoder $FREEZE_EEG_ENCODER \
+    --eeg_encoder_lr_scale $EEG_ENCODER_LR_SCALE \
+    --unfrozen_eeg_mode $UNFROZEN_EEG_MODE \
     --num_workers $NUM_WORKERS \
     --log_interval $LOG_INTERVAL \
     --val_interval $VAL_INTERVAL \
