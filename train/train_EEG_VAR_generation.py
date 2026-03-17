@@ -325,6 +325,11 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args, writer, 
 def validate(model, val_loader, args, writer=None, epoch=None):
     """Validate the model with comprehensive metrics."""
     model.eval()
+    # Ensure all components are in eval mode
+    model.var.eval()
+    model.eeg_clip_model.eval()
+    model.vae.eval()
+
     total_loss = 0.0
 
     # Accumulate per-scale metrics

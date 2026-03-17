@@ -27,15 +27,15 @@ VAR_DEPTH=16
 VAR_CKPT="datasets/pretrain_weights/var_d${VAR_DEPTH}.pth"
 
 # Training hyperparameters
-EPOCHS=150
+EPOCHS=100
 BATCH_SIZE=64
 LR=1e-4
 WARMUP_EPOCHS=10
 WEIGHT_DECAY=0.05
 LABEL_SMOOTHING=0.1
 GRAD_CLIP=1.0
-FREEZE_EEG_ENCODER="true"       # Set to "false" to unfreeze and train EEG encoder
-EEG_ENCODER_LR_SCALE=0.1        # LR multiplier for EEG encoder when unfrozen (0.1 = 10x lower)
+FREEZE_EEG_ENCODER="false"       # Set to "false" to unfreeze and train EEG encoder
+EEG_ENCODER_LR_SCALE=0.5        # LR multiplier for EEG encoder when unfrozen (0.1 = 10x lower)
 UNFROZEN_EEG_MODE="eval"        # "eval" (partial fine-tuning, BN/Dropout frozen) or "train" (full fine-tuning)
                                 # Only applies when FREEZE_EEG_ENCODER="false". Default: "eval" (recommended)
 
