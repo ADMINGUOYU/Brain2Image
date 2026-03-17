@@ -5,9 +5,17 @@
 # NOTE: Evaluation metrics are computed automatically after generation.
 #       Use --skip_eval true to disable evaluation (faster, images only).
 
+# ── Cache ─────────────────────────────────────────────────────────────────────
+# Cache directory for pretrained model weights (torchvision, CLIP, SwAV, etc.)
+export TORCH_HOME="datasets/transformers_cache"
+export HF_HOME="datasets/transformers_cache"
+export HF_HUB_CACHE="datasets/transformers_cache"
+export HUGGINGFACE_HUB_CACHE="datasets/transformers_cache"
+export TRANSFORMERS_CACHE="datasets/transformers_cache"
+
 # Trained model checkpoint
 # Update this path to your trained checkpoint
-CHECKPOINT="runs/EEG_VAR_generation_CBraMod_d16_20260316_163820/checkpoints/best_model.pth"
+CHECKPOINT="runs/EEG_VAR_generation_CBraMod_d16_20260316_182831/checkpoints/best_model.pth"
 
 # Extract experiment directory from checkpoint path
 EXPERIMENT_DIR="${CHECKPOINT%/checkpoints/*}"
