@@ -108,8 +108,16 @@ class EEG_CLIP_Align(nn.Module):
         loss_cfg = param.get('Loss', {})
         self.mse_scale      = loss_cfg.get('mse_scale',      1.0)
         self.infonce_scale  = loss_cfg.get('infonce_scale',   1.0)
-        self.logit_scale    = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.normalize_clip = loss_cfg.get('normalize_clip',  True)
+
+        # Temperature for InfoNCE loss
+        init_temperature = loss_cfg.get('temperature', 0.07)
+        learnable_temperature = loss_cfg.get('learnable_temperature', True)
+        if learnable_temperature:
+            self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / init_temperature))
+        else:
+            self.register_buffer('logit_scale', torch.ones([]) * np.log(1 / init_temperature))
+        self.learnable_temperature = learnable_temperature
 
     def forward(self, eeg_input: torch.Tensor) -> torch.Tensor:
         """
@@ -211,6 +219,7 @@ class EEG_CLIP_Align(nn.Module):
             'mse_scale':      self.mse_scale,
             'infonce_scale':  self.infonce_scale,
             'normalize_clip': self.normalize_clip,
+            'learnable_temperature': self.learnable_temperature,
             'EEG_Encoder_type': type(self.eeg_encoder).__name__,
         }
         torch.save({
@@ -236,6 +245,7 @@ class EEG_CLIP_Align(nn.Module):
         self.mse_scale      = loaded['parameters']['mse_scale']
         self.infonce_scale  = loaded['parameters']['infonce_scale']
         self.normalize_clip = loaded['parameters']['normalize_clip']
+        self.learnable_temperature = loaded['parameters'].get('learnable_temperature', True)
 
 
 # Test code

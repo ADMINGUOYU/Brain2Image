@@ -72,6 +72,11 @@ def get_args() -> argparse.Namespace:
     # Loss hyperparameters
     parser.add_argument('--mse_scale',     type=float, default=1.0)
     parser.add_argument('--infonce_scale', type=float, default=0.2)
+    parser.add_argument('--temperature',   type=float, default=0.07,
+                        help='Initial temperature for InfoNCE loss')
+    parser.add_argument('--learnable_temperature',
+                        type=lambda x: x.lower() == 'true', default=True,
+                        help='Whether to make temperature learnable (default: True)')
     parser.add_argument('--normalize_clip',
                         type=lambda x: x.lower() == 'true', default=True)
 
@@ -303,6 +308,8 @@ if __name__ == "__main__":
         'Loss': {
             'mse_scale':      args.mse_scale,
             'infonce_scale':  args.infonce_scale,
+            'temperature':    args.temperature,
+            'learnable_temperature': args.learnable_temperature,
             'normalize_clip': args.normalize_clip,
         },
     }

@@ -20,12 +20,12 @@
 # ============================================================================ #
 SEED=648                    # Random seed for reproducibility
 CUDA=0                      # GPU device ID
-EPOCHS=100                  # Number of training epochs
-BATCH_SIZE=64               # Batch size for training
-LR=1e-4                     # Base learning rate
+EPOCHS=150                  # Number of training epochs
+BATCH_SIZE=128               # Batch size for training
+LR=5e-4                     # Base learning rate
 MULTI_LR="true"             # Use differential learning rates (backbone: BACKBONE_LR_SCALE x, head: 1.0x)
-BACKBONE_LR_SCALE=0.2       # LR multiplier for eeg_encoder.backbone when MULTI_LR=true
-WARMUP_EPOCHS=10            # Linear warmup epochs before cosine annealing (0 = no warmup)
+BACKBONE_LR_SCALE=1         # LR multiplier for eeg_encoder.backbone when MULTI_LR=true
+WARMUP_EPOCHS=15            # Linear warmup epochs before cosine annealing (0 = no warmup)
 WEIGHT_DECAY=5e-2           # Weight decay for AdamW optimizer
 OPTIMIZER="AdamW"           # Optimizer type
 CLIP_VALUE=1.0              # Gradient clipping value
@@ -95,10 +95,11 @@ MODEL_DIR=""                # Path to full checkpoint (leave empty for fresh tra
 #
 # Note: No prototypical distillation (no cluster labels in EEG-CLIP dataset)
 
-MSE_SCALE=1.0               # Weight for MSE loss
-INFONCE_SCALE=0.2           # Weight for InfoNCE contrastive loss
-TEMPERATURE=0.1             # Temperature for InfoNCE softmax
-NORMALIZE_CLIP="true"       # L2-normalize CLIP embeddings before loss computation
+MSE_SCALE=1.0                    # Weight for MSE loss
+INFONCE_SCALE=0.3                # Weight for InfoNCE contrastive loss
+TEMPERATURE=0.07                 # Initial temperature for InfoNCE (default: 0.07)
+LEARNABLE_TEMPERATURE="true"     # Make temperature learnable during training (default: true)
+NORMALIZE_CLIP="true"            # L2-normalize CLIP embeddings before loss computation
 
 # ---------------------------------------------------- #
 # ATMS-specific parameters (if EEG_ENCODER_TYPE=ATMS)
@@ -166,6 +167,8 @@ CMD="python -m train.train_EEG_CLIP_align \
     --atms_factor $ATMS_FACTOR \
     --mse_scale $MSE_SCALE \
     --infonce_scale $INFONCE_SCALE \
+    --temperature $TEMPERATURE \
+    --learnable_temperature $LEARNABLE_TEMPERATURE \
     --normalize_clip $NORMALIZE_CLIP \
     --script_path $0"
 
